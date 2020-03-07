@@ -1,0 +1,42 @@
+import torch
+import torchvision.transforms as T
+ROOT_2 = 1.41421
+ln2 = 0.69314
+DEVICE = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+DATASET_PATH = './TANOCI-v2'
+WEIGHT_SAVE_PATH = './result/'
+IMG_SAVE_PATH = './result_img/'
+BASIC_TRANSFORM = T.Compose([T.RandomHorizontalFlip(), T.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2)])
+IMG_LEVEL = 6
+IMG_SIZE = 2**IMG_LEVEL
+BATCH_SIZE = 16
+EPOCH = 10000
+VERBOSE_CNT = 50
+SAVE_FREQ = 20
+COV = 1.0
+PL_COV = 0.1
+INTERPOLATE_NUM = 8
+EMA_DECAY = 0.99
+#EMA_COEF = 1.0
+REG = 0.001
+
+STYLE_SIZE = 64
+Z_SIZE = 8
+TEXTURE_SIZE = 4
+GEN_CHANNEL = 256
+GEN_NON_LOCAL_LOC_V1 = (2,)
+GEN_NON_LOCAL_LOC_V2 = (3,)
+GEN_BETAS = (0.0, 0.99)
+GEN_LR = 0.0001
+MAPPING_LR = GEN_LR*0.1
+GEN_LAZY_REG = 8
+EMA_COEF = (GEN_LAZY_REG*ln2)/((IMG_SIZE**2)*(IMG_LEVEL-1)*ln2)
+
+DISC_FIRST_CHANNEL = 16
+DISC_LAST_SIZE = 4
+DISC_NON_LOCAL_LOC_V1 = (3,)
+DISC_NON_LOCAL_LOC_V2 = (4,)
+DISC_BETAS = (0.0, 0.99)
+DISC_LR = 0.0004
+DISC_STEP = 1
+GP_COEF = 10.0
