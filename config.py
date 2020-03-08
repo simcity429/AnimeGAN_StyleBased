@@ -9,13 +9,13 @@ IMG_SAVE_PATH = './result_img/'
 BASIC_TRANSFORM = T.Compose([T.RandomHorizontalFlip(), T.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2)])
 IMG_LEVEL = 6
 IMG_SIZE = 2**IMG_LEVEL
-BATCH_SIZE = 16
+BATCH_SIZE = 24
 EPOCH = 10000
 VERBOSE_CNT = 50
 SAVE_FREQ = 20
 COV = 1.0
 PL_COV = 0.1
-INTERPOLATE_NUM = 8
+INTERPOLATE_NUM = 4
 EMA_DECAY = 0.99
 #EMA_COEF = 1.0
 REG = 0.001

@@ -13,8 +13,6 @@ def init_weights(m):
     if type(m) == Linear or type(m) == Conv2d:
         torch.nn.init.orthogonal_(m.weight)
         m.bias.data.fill_(0)
-    elif type(m) == _ModulatedConv:
-        torch.nn.init.orthogonal_(m.weight)
 
 class ResidualBlock(Module):
     def __init__(self, in_channels, out_channels):
@@ -71,6 +69,7 @@ class _ModulatedConv(Module):
     def __init__(self, in_channels, out_channels, kernel_size):
         super().__init__()
         self.weight = torch.nn.Parameter(torch.randn(out_channels, in_channels, kernel_size, kernel_size))
+        self.bias = torch.nn.Parameter(torch.zeros(1, out_channels, 1, 1))
         self.prelu = PReLU()
         #[Cout,Cin,k,k]
 
@@ -93,7 +92,7 @@ class _ModulatedConv(Module):
         x = x.view(1, -1, x.size(2), x.size(3))
         #[1,N*C,H,W]
         x = F.conv2d(x, weight, groups=batch_size, padding=1)
-        x = x.view(batch_size, out_channels, H, W)
+        x = x.view(batch_size, out_channels, H, W) + self.bias
         x = self.prelu(x)
         return x
 

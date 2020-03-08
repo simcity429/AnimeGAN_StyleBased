@@ -10,25 +10,25 @@ from Networkv1 import StyleMapper
 from Networkv2 import Discriminator, Generator
 from CustomDataset import TANOCIv2_Dataset
 
-#Non-saturating loss with R1 Gradient penalty
+#WGAN-GP with path length reg
 if __name__ == '__main__':
-    torch.cuda.empty_cache()
     dataset = TANOCIv2_Dataset()
     dataloader = DataLoader(dataset=dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=8)
     S = StyleMapper()
     G = Generator()
     D = Discriminator()
-    
     #Linear interpolation regulation
-    '''
+
     dist = MultivariateNormal(loc=torch.zeros(BATCH_SIZE//INTERPOLATE_NUM,Z_SIZE), covariance_matrix=COV*torch.eye(Z_SIZE))
-    tmp = dist.sample().numpy()
-    visual_seed = torch.FloatTensor(np.linspace(tmp, -tmp, INTERPOLATE_NUM).transpose(1,0,2).reshape((-1,Z_SIZE))).to(DEVICE)
+    v = dist.sample().numpy()
+    visual_seed = torch.FloatTensor(np.linspace(v, -v, INTERPOLATE_NUM).transpose(1,0,2).reshape((-1,Z_SIZE))).to(DEVICE)
+    
+    #baseline
     '''
     dist = MultivariateNormal(loc=torch.zeros(BATCH_SIZE, Z_SIZE), covariance_matrix=COV*torch.eye(Z_SIZE))
-    pl_dist = MultivariateNormal(loc=torch.zeros(BATCH_SIZE, 3*IMG_SIZE*IMG_SIZE), covariance_matrix=PL_COV*torch.eye(3*IMG_SIZE*IMG_SIZE))
     visual_seed = torch.FloatTensor(dist.sample()).to(DEVICE)
-    
+    '''
+    pl_dist = MultivariateNormal(loc=torch.zeros(BATCH_SIZE, 3*IMG_SIZE*IMG_SIZE), covariance_matrix=PL_COV*torch.eye(3*IMG_SIZE*IMG_SIZE))
     previous_grads_norm = 0
     step_cnt = 1
     verbose_cnt = VERBOSE_CNT - 1
@@ -38,12 +38,21 @@ if __name__ == '__main__':
             batch_size = real.size()[0]
             
             #Linear interpolation regulation
-            '''
-            tmp = dist.sample().numpy()
-            z = torch.FloatTensor(np.linspace(tmp, -tmp, INTERPOLATE_NUM).transpose(1,0,2).reshape((-1,Z_SIZE))).to(DEVICE)[:batch_size]
+            
+            v = dist.sample().numpy()
+            v_len = np.sqrt(np.sum(v**2, axis=1, keepdims=True))
+            v /= v_len
+            v *= 2*Z_SIZE
+            v = v.reshape(BATCH_SIZE//INTERPOLATE_NUM,Z_SIZE,1)
+            epsilon = np.random.uniform(low=0.0,high=1.0,size=INTERPOLATE_NUM).reshape((1,1,-1))
+            v = v - 2*v*epsilon
+            v = v.transpose((0,2,1)).reshape(BATCH_SIZE, -1)
+            z = torch.FloatTensor(v).to(DEVICE)[:batch_size]
+            
+            #baseline
             '''
             z = torch.FloatTensor(dist.sample()).to(DEVICE)[:batch_size]
-            
+            '''
             print('------------!--------------!------------')
             #d_update
             G_fake = G(S(z))

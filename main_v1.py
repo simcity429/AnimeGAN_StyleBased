@@ -22,8 +22,8 @@ if __name__ == '__main__':
     #Linear interpolation regulation
     '''
     dist = MultivariateNormal(loc=torch.zeros(BATCH_SIZE//INTERPOLATE_NUM,Z_SIZE), covariance_matrix=COV*torch.eye(Z_SIZE))
-    tmp = dist.sample().numpy()
-    visual_seed = torch.FloatTensor(np.linspace(tmp, -tmp, INTERPOLATE_NUM).transpose(1,0,2).reshape((-1,Z_SIZE))).to(DEVICE)
+    v = dist.sample().numpy()
+    visual_seed = torch.FloatTensor(np.linspace(v, -v, INTERPOLATE_NUM).transpose(1,0,2).reshape((-1,Z_SIZE))).to(DEVICE)
     '''
     verbose_cnt = VERBOSE_CNT - 1
     for e in range(EPOCH):
@@ -34,8 +34,14 @@ if __name__ == '__main__':
             z = torch.FloatTensor(dist.sample()).to(DEVICE)[:batch_size]
             #Linear interpolation regulation
             '''
-            tmp = dist.sample().numpy()
-            z = torch.FloatTensor(np.linspace(tmp, -tmp, INTERPOLATE_NUM).transpose(1,0,2).reshape((-1,Z_SIZE))).to(DEVICE)[:batch_size]
+            v = dist.sample().numpy()
+            v_len = np.sqrt(np.sum(v**2, axis=1, keepdims=True))
+            v /= v_len
+            v = v.reshape(BATCH_SIZE//INTERPOLATE_NUM,Z_SIZE,1)
+            epsilon = np.random.uniform(low=0.0,high=1.0,size=INTERPOLATE_NUM).reshape((1,1,-1))
+            v = v - 2*v*epsilon
+            v = v.transpose((0,2,1)).reshape(BATCH_SIZE, -1)
+            z = torch.FloatTensor(v).to(DEVICE)[:batch_size]
             '''
             print('------------!--------------!------------')
             #d_update
