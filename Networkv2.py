@@ -10,7 +10,7 @@ from config import *
 
 
 def init_weights(m):
-    if type(m) == Linear or type(m) == Conv2d:
+    if type(m) == Linear or type(m) == Conv2d or type(m) = _ModulatedConv:
         torch.nn.init.orthogonal_(m.weight)
         m.bias.data.fill_(0)
 

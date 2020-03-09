@@ -24,10 +24,9 @@ if __name__ == '__main__':
     visual_seed = torch.FloatTensor(np.linspace(v, -v, INTERPOLATE_NUM).transpose(1,0,2).reshape((-1,Z_SIZE))).to(DEVICE)
     
     #baseline
-    '''
+    
     dist = MultivariateNormal(loc=torch.zeros(BATCH_SIZE, Z_SIZE), covariance_matrix=COV*torch.eye(Z_SIZE))
-    visual_seed = torch.FloatTensor(dist.sample()).to(DEVICE)
-    '''
+    
     pl_dist = MultivariateNormal(loc=torch.zeros(BATCH_SIZE, 3*IMG_SIZE*IMG_SIZE), covariance_matrix=PL_COV*torch.eye(3*IMG_SIZE*IMG_SIZE))
     previous_grads_norm = 0
     step_cnt = 1
@@ -38,7 +37,7 @@ if __name__ == '__main__':
             batch_size = real.size()[0]
             
             #Linear interpolation regulation
-            
+            '''
             v = dist.sample().numpy()
             v_len = np.sqrt(np.sum(v**2, axis=1, keepdims=True))
             v /= v_len
@@ -48,11 +47,11 @@ if __name__ == '__main__':
             v = v - 2*v*epsilon
             v = v.transpose((0,2,1)).reshape(BATCH_SIZE, -1)
             z = torch.FloatTensor(v).to(DEVICE)[:batch_size]
-            
+            '''
             #baseline
-            '''
+            
             z = torch.FloatTensor(dist.sample()).to(DEVICE)[:batch_size]
-            '''
+            
             print('------------!--------------!------------')
             #d_update
             G_fake = G(S(z))
