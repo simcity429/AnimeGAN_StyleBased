@@ -12,9 +12,13 @@ if __name__ == '__main__':
     parser.add_argument('--lir', required=True)
     parser.add_argument('--device', required=True)
     parser.add_argument('--save_path', required=True)
+    parser.add_argument('--batch_size', required=True)
+    parser.add_argument('--image_level', required=True)
     args = parser.parse_args()
     config.DEVICE = args.device
     config.SAVE_PATH = args.save_path
+    config.BATCH_SIZE = int(args.batch_size)
+    config.IMG_LEVEL = int(args.image_level)
     if args.lir == "True" or args.lir == "true":
         lir = True
     elif args.lir == "False" or args.lir == "false":
