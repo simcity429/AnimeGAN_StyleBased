@@ -1,8 +1,5 @@
 /TANOCI-v2
 /__pycache__
-/result
 /result_img
+/result_weight
 /.vscode
-__pycache__/config.cpython-37.pyc
-__pycache__/CustomDataset.cpython-37.pyc
-__pycache__/Networkv2.cpython-37.pyc

@@ -4,15 +4,14 @@ ROOT_2 = 1.41421
 ln2 = 0.69314
 DEVICE = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 DATASET_PATH = './TANOCI-v2'
-WEIGHT_SAVE_PATH = './result/'
-IMG_SAVE_PATH = './result_img/'
+SAVE_PATH = './result'
 BASIC_TRANSFORM = T.Compose([T.RandomHorizontalFlip(), T.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2)])
 IMG_LEVEL = 6
 IMG_SIZE = 2**IMG_LEVEL
 BATCH_SIZE = 24
 EPOCH = 10000
 VERBOSE_CNT = 50
-SAVE_FREQ = 20
+SAVE_FREQ = 2
 COV = 1.0
 PL_COV = 0.1
 INTERPOLATE_NUM = 4
