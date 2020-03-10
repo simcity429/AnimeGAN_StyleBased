@@ -42,7 +42,7 @@ if __name__ == '__main__':
     v = dist.sample().numpy()
     v_len = np.sqrt(np.sum(v**2, axis=1, keepdims=True))
     v /= v_len
-    v *= float(np.sqrt(Z_SIZE))
+    v *= float(2*np.sqrt(Z_SIZE))
     visual_seed = torch.FloatTensor(np.linspace(v, -v, INTERPOLATE_NUM).transpose(1,0,2).reshape((-1,Z_SIZE))).to(DEVICE)
     
     #baseline
