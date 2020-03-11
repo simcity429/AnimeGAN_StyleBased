@@ -21,6 +21,8 @@ if __name__ == '__main__':
     config.SAVE_PATH = args.save_path
     config.BATCH_SIZE = int(args.batch_size)
     config.IMG_LEVEL = int(args.image_level)
+    config.IMG_SIZE = 2**(config.IMG_LEVEL)
+    config.EMA_COEF = (config.GEN_LAZY_REG*config.ln2)/((config.IMG_SIZE**2)*(config.IMG_LEVEL-1)*config.ln2)
     if args.lir == "True" or args.lir == "true":
         lir = True
     elif args.lir == "False" or args.lir == "false":
