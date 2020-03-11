@@ -24,7 +24,7 @@ class ResidualBlock(Module):
         t = x
         x = self.disc_block(x)
         t = t.contiguous()
-        t = F.avg_pool2d(self.conv(t))
+        t = F.avg_pool2d(self.conv(t), kernel_size=2, stride=2)
         x = (x + t)/ROOT_2
         return x
 
@@ -44,7 +44,7 @@ class Discriminator(Module):
             out_channels *= 2
             if in_size == DISC_LAST_SIZE:
                 break
-            self.module_list.append(build_disc_convblock(in_channels, out_channels))
+            self.module_list.append(ResidualBlock(in_channels, out_channels))
             if cnt in DISC_NON_LOCAL_LOC_V2:
                 print('disc: non_local block inserted')
                 self.module_list.append(Non_Local(out_channels))
@@ -137,10 +137,10 @@ class Generator(Module):
         super().__init__()
         self.basic_texture = torch.nn.Parameter(torch.rand(GEN_CHANNEL, TEXTURE_SIZE, TEXTURE_SIZE))
         self.module_list = ModuleList()
-        first_block = ModulatedConvBlock(GEN_CHANNEL, GEN_CHANNEL//2, kernel_size=3, up=False, out=True)
+        first_block = ModulatedConvBlock(GEN_CHANNEL, GEN_CHANNEL, kernel_size=3, up=False, out=True)
         self.module_list.append(first_block)
         in_size = 2*TEXTURE_SIZE
-        in_channels = GEN_CHANNEL//2
+        in_channels = GEN_CHANNEL
         cnt = 0
         while True:
             cnt += 1

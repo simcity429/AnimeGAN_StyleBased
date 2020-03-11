@@ -7,6 +7,9 @@ from torch.utils.data import DataLoader
 from torch.distributions import MultivariateNormal
 from torch.nn import BCEWithLogitsLoss
 
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
 #WGAN-GP with path length reg
 if __name__ == '__main__':
     import config
@@ -38,6 +41,8 @@ if __name__ == '__main__':
     S = StyleMapper()
     G = Generator()
     D = Discriminator()
+    print('Parameter numbers: S, G, D')
+    print(count_parameters(S), count_parameters(G), count_parameters(D))
     #Linear interpolation regulation
 
     dist = MultivariateNormal(loc=torch.zeros(BATCH_SIZE//INTERPOLATE_NUM,Z_SIZE), covariance_matrix=COV*torch.eye(Z_SIZE))
