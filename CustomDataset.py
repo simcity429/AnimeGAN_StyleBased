@@ -13,6 +13,7 @@ class TANOCIv2_Dataset(Dataset):
     def __init__(self, transform=BASIC_TRANSFORM):
         #transform only has to contain data augmentating transformation
         super().__init__()
+        self.img_size = IMG_SIZE
         self.img_list = []
         self.transform = transform
         dir_list = [i for i in os.listdir(DATASET_PATH) if i != 'list.txt'] 
@@ -30,14 +31,14 @@ class TANOCIv2_Dataset(Dataset):
         img_path = self.img_list[index]
         img = Image.open(img_path)
         if self.transform is None:
-            img = TF.resize(img, IMG_SIZE)
-            img = TF.center_crop(img, IMG_SIZE)
+            img = TF.resize(img, self.img_size)
+            img = TF.center_crop(img, self.img_size)
             img = TF.to_tensor(img)
             return img
         else:
-            img = TF.resize(img, IMG_SIZE)
+            img = TF.resize(img, self.img_size)
             img = self.transform(img)
-            img = TF.center_crop(img, IMG_SIZE)
+            img = TF.center_crop(img, self.img_size)
             img = TF.to_tensor(img)
             return img
 
