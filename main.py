@@ -42,7 +42,7 @@ if __name__ == '__main__':
     parser.add_argument('--z_size', default=8)
     parser.add_argument('--texture_size', default=4)
     parser.add_argument('--gen_channel', default=256)
-    parser.add_argument('--gen_nonlocal_loc', default=3)
+    parser.add_argument('--gen_nonlocal_loc', default=2)
     parser.add_argument('--gen_lr', default=0.0001)
     parser.add_argument('--mapping_lr', default=0.00001)
     parser.add_argument('--gen_lazy', default=8)
@@ -50,7 +50,7 @@ if __name__ == '__main__':
     #discriminator arguments
     parser.add_argument('--disc_first_channel', default=16)
     parser.add_argument('--disc_last_size', default=4)
-    parser.add_argument('--disc_nonlocal_loc', default=4)
+    parser.add_argument('--disc_nonlocal_loc', default=2)
     parser.add_argument('--disc_lr', default=0.0004)
     parser.add_argument('--gp_coef', default=10)
     args = parser.parse_args()
@@ -126,6 +126,7 @@ if __name__ == '__main__':
         D = DataParallel(D)
     print('Parameter numbers: S, G, D')
     print(count_parameters(S), count_parameters(G), count_parameters(D))
+    assert False
     #visual seed(interpolation applied)
     dist = MultivariateNormal(loc=torch.zeros(batch_size//interpolate_num,z_size), covariance_matrix=z_cov*torch.eye(z_size))
     v = dist.sample().numpy()
