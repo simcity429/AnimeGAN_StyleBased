@@ -18,7 +18,7 @@ ln2 = 0.69314
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-#WGAN-GP with path length reg
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     #general arguments
@@ -136,7 +136,6 @@ if __name__ == '__main__':
     #baseline
     if not lir:
         dist = MultivariateNormal(loc=torch.zeros(batch_size, z_size), covariance_matrix=z_cov*torch.eye(z_size))
-    
     pl_dist = MultivariateNormal(loc=torch.zeros(batch_size, 3*img_size*img_size), covariance_matrix=pl_cov*torch.eye(3*img_size*img_size))
     previous_grads_norm = 0
     step_cnt = 1
@@ -144,10 +143,10 @@ if __name__ == '__main__':
     for e in range(epoch):
         for real in dataloader:
             real = real.to(device)
-            batch_size = real.size()[0]
+            real_batch_size = real.size()[0]
             #baseline
             if not lir:
-                z = torch.FloatTensor(dist.sample()).to(device)[:batch_size]
+                z = torch.FloatTensor(dist.sample()).to(device)[:real_batch_size]
             else:
                 #Linear interpolation regulation
                 v = dist.sample().numpy()
@@ -157,7 +156,7 @@ if __name__ == '__main__':
                 epsilon = np.random.normal(0, 1, size=(batch_size//interpolate_num, interpolate_num)).reshape((batch_size//interpolate_num,1,interpolate_num))
                 v = v*epsilon
                 v = v.transpose((0,2,1)).reshape(batch_size, -1)
-                z = torch.FloatTensor(v).to(device)[:batch_size]
+                z = torch.FloatTensor(v).to(device)[:real_batch_size]
             print('------------!--------------!------------')
             #d_update
             G_fake = G(S(z))
@@ -167,7 +166,7 @@ if __name__ == '__main__':
             d_loss = -(torch.mean(real_out) - torch.mean(fake_out))
             print('epoch:', e, 'd_loss', d_loss)
             #gradient penalty for WGAN_GP
-            epsilon = torch.rand(batch_size, 1, 1, 1).to(device)
+            epsilon = torch.rand(real_batch_size, 1, 1, 1).to(device)
             interpolated = epsilon*fake + (1-epsilon)*real
             interpolated.requires_grad_()
             interpolated_out = D(interpolated)
@@ -175,7 +174,7 @@ if __name__ == '__main__':
                 grad_outputs=torch.ones_like(interpolated_out).to(device), 
                 retain_graph=True, create_graph=True
             )[0]
-            grads = grads.view(batch_size, -1)
+            grads = grads.view(real_batch_size, -1)
             grad_penalty = torch.mean((grads.norm(2, dim=1)-1)**2)
             print('WGAN grad_penalty: ', float(grad_penalty.detach().cpu().numpy()))
             d_loss += gp_coef*grad_penalty
@@ -194,15 +193,15 @@ if __name__ == '__main__':
             print('epoch:', e, '!!!g_loss', g_loss)
             if step_cnt % gen_lazy == 0 and version == 2:
                 #path length Regulation
-                y = pl_dist.sample().to(device)[:batch_size]
+                y = pl_dist.sample().to(device)[:real_batch_size]
                 w = S(z)
-                Gw = G(w).view(batch_size, -1)
-                Jy = torch.bmm(Gw.view(batch_size, 1, -1), y.view(batch_size, -1, 1))
+                Gw = G(w).view(real_batch_size, -1)
+                Jy = torch.bmm(Gw.view(real_batch_size, 1, -1), y.view(real_batch_size, -1, 1))
                 grads = torch.autograd.grad(Jy, w, 
                     grad_outputs=torch.ones_like(Jy).to(device),
                     retain_graph=True, create_graph=True
                 )[0]
-                grads = grads.view(batch_size, -1)
+                grads = grads.view(real_batch_size, -1)
                 grads_norm = grads.norm(2, dim=1)
                 current_grads_norm = float(torch.mean(grads_norm).detach().cpu().numpy())
                 grad_penalty = torch.mean(grads_norm - previous_grads_norm)**2

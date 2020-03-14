@@ -164,14 +164,19 @@ class Generator(Module):
         while True:
             cnt += 1
             former = ModulatedConvBlock(in_channels, in_channels, 3, style_size, use_gpu, up=True, out=False)
-            latter = ModulatedConvBlock(in_channels, in_channels//2, 3, style_size, use_gpu, up=False, out=True)
+            if cnt > 1:
+                latter = ModulatedConvBlock(in_channels, in_channels//2, 3, style_size, use_gpu, up=False, out=True)
+                out_channels = in_channels//2
+            else:
+                latter = ModulatedConvBlock(in_channels, in_channels, 3, style_size, use_gpu, up=False, out=True)
+                out_channels = in_channels
             self.module_list.append(former)
             self.module_list.append(latter)
             if cnt == gen_nonlocal_loc:
                 print('gen: non_local block inserted, in_size: ', 2*in_size)
-                self.module_list.append(Non_Local(in_channels//2))
+                self.module_list.append(Non_Local(out_channels))
             in_size *= 2
-            in_channels //= 2
+            in_channels = out_channels
             if in_size > img_size:
                 break
         self.to(device)
