@@ -126,7 +126,6 @@ if __name__ == '__main__':
         D = DataParallel(D)
     print('Parameter numbers: S, G, D')
     print(count_parameters(S), count_parameters(G), count_parameters(D))
-    assert False
     #visual seed(interpolation applied)
     dist = MultivariateNormal(loc=torch.zeros(batch_size//interpolate_num,z_size), covariance_matrix=z_cov*torch.eye(z_size))
     v = dist.sample().numpy()
