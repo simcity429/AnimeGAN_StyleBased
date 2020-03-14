@@ -27,9 +27,9 @@ if __name__ == '__main__':
     parser.add_argument('--device', default='cuda:0')
     parser.add_argument('--dataset_path', required=True)
     parser.add_argument('--save_path', required=True)
-    parser.add_argument('--epoch', default=3)
+    parser.add_argument('--epoch', default=1000)
     parser.add_argument('--img_level', default=6)
-    parser.add_argument('--batch_size', default=48)
+    parser.add_argument('--batch_size', default=24)
     parser.add_argument('--verbose_freq', default=100)
     parser.add_argument('--save_freq', default=10)
     parser.add_argument('--z_cov', default=1)
@@ -178,10 +178,16 @@ if __name__ == '__main__':
             grads = grads.view(batch_size, -1)
             grad_penalty = torch.mean((grads.norm(2, dim=1)-1)**2)
             print('WGAN grad_penalty: ', float(grad_penalty.detach().cpu().numpy()))
-            d_loss += gp_coef*grad_penalty      
-            D.opt.zero_grad()
+            d_loss += gp_coef*grad_penalty
+            if torch.cuda.device_count() > 1 and use_multi_gpu:
+                D.module.opt.zero_grad()
+            else:
+                D.opt.zero_grad()      
             d_loss.backward()
-            D.opt.step()
+            if torch.cuda.device_count() > 1 and use_multi_gpu:
+                D.module.opt.step()
+            else:
+                D.opt.step() 
             #g_update
             fake_out = D(G_fake)
             g_loss = -torch.mean(fake_out)
@@ -203,15 +209,22 @@ if __name__ == '__main__':
                 print('gen_grad_penalty', float(grad_penalty.detach().cpu().numpy()))
                 previous_grads_norm = previous_grads_norm*ema_decay + (1-ema_decay)*current_grads_norm
                 print('a:', previous_grads_norm)
-                g_loss += ema_coef*grad_penalty                        
-            S.opt.zero_grad()
-            G.opt.zero_grad()
+                g_loss += ema_coef*grad_penalty
+            if torch.cuda.device_count() > 1 and use_multi_gpu:                        
+                S.module.opt.zero_grad()
+                G.module.opt.zero_grad()
+            else:
+                S.opt.zero_grad()
+                G.opt.zero_grad()
             g_loss.backward()
-            S.opt.step()
-            G.opt.step()
+            if torch.cuda.device_count() > 1 and use_multi_gpu:
+                S.module.opt.step()
+                G.module.opt.step()
+            else:
+                S.opt.step()
+                G.opt.step()
             step_cnt += 1
             verbose_cnt += 1
-            assert False
             if verbose_cnt % verbose_freq == 0:
                 img_save_path = save_path + '_img/'
                 index = str(verbose_cnt//verbose_freq)

@@ -52,7 +52,7 @@ class Discriminator(Module):
                 break
             self.module_list.append(ResidualBlock(in_channels, out_channels))
             if cnt == disc_nonlocal_loc:
-                print('disc: non_local block inserted')
+                print('disc: non_local block inserted, in_size: ', in_size//2)
                 self.module_list.append(Non_Local(out_channels))
             in_size //= 2
         self.module_list.append(Conv2d(in_channels=in_channels, out_channels=in_channels, kernel_size=4, stride=1, padding=0))
@@ -130,7 +130,8 @@ class ModulatedConvBlock(Module):
         img_size = x.size(2)
         noise = make_noise_img(batch_size, img_size)
         if self.use_gpu:
-            noise = noise.cuda()
+            with torch.cuda.device_of(x):
+                noise = noise.cuda()
         else:
             noise = noise.cpu()
         x = self.modulated_conv(x, style_std)
@@ -167,7 +168,7 @@ class Generator(Module):
             self.module_list.append(former)
             self.module_list.append(latter)
             if cnt == gen_nonlocal_loc:
-                print('gen: non_local block inserted')
+                print('gen: non_local block inserted, in_size: ', 2*in_size)
                 self.module_list.append(Non_Local(in_channels//2))
             in_size *= 2
             in_channels //= 2

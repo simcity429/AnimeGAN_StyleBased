@@ -111,7 +111,7 @@ class Discriminator(Module):
                 break
             self.module_list.append(build_disc_convblock(in_channels, out_channels))
             if cnt == disc_nonlocal_loc:
-                print('disc: non_local block inserted')
+                print('disc: non_local block inserted, in_size: ', in_size//2)
                 self.module_list.append(Non_Local(out_channels))
             in_size //= 2
         self.module_list.append(Minibatch_Stddev())
@@ -152,7 +152,8 @@ class Generator_Conv(Module):
         W = content.size(3)
         noise = make_noise_img(batch_size, (2*H, 2*W))
         if self.use_gpu:
-            noise = noise.cuda()
+            with torch.cuda.device_of(content):
+                noise = noise.cuda()
         else:
             noise = noise.cpu()
         content = self.upsample_layer(content)
@@ -213,7 +214,7 @@ class Generator(Module):
             cnt += 1
             self.module_list.append(Generator_Conv(in_channels, in_channels//2, 3, style_size, self.use_gpu))
             if cnt == gen_nonlocal_loc:
-                print('gen: non_local block inserted')
+                print('gen: non_local block inserted, in_size: ', 2*in_size)
                 self.module_list.append(Non_Local(in_channels//2))
             in_channels //= 2
             in_size *= 2
@@ -230,7 +231,8 @@ class Generator(Module):
         x = self.basic_texture.repeat(batch_size, 1, 1, 1)
         noise = make_noise_img(batch_size, 4)
         if self.use_gpu:
-            noise = noise.cuda()
+            with torch.cuda.device_of(style_base):
+                noise = noise.cuda()
         else:
             noise = noise.cpu()
         x = x + self.noise_scaler_1*noise
