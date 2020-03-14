@@ -6,8 +6,12 @@ from torch.nn import Module, ModuleList, Sequential
 from torch.nn.utils import spectral_norm
 from torch.optim import Adam
 from Networkv1 import make_noise_img, build_disc_convblock, StyleMapper, Non_Local, Minibatch_Stddev
-from config import *
 
+BETAS = (0, 0.99)
+
+#constant
+ROOT_2 = 1.41421
+ln2 = 0.69314
 
 def init_weights(m):
     if type(m) == Linear or type(m) == Conv2d or type(m) == _ModulatedConv:
@@ -29,23 +33,25 @@ class ResidualBlock(Module):
         return x
 
 class Discriminator(Module):
-    def __init__(self):
+    def __init__(self, disc_first_channel, disc_last_size, disc_nonlocal_loc, disc_lr, img_size, device):
         super().__init__()
+        if not(device == 'cpu' or 'cuda:' in device):
+            assert Exception('invalid argument in Network2.Discriminator')
         self.module_list = ModuleList()
         in_channels = 3
-        out_channels = DISC_FIRST_CHANNEL
+        out_channels = disc_first_channel
         #fromRGB
-        self.module_list.append(Conv2d(in_channels=in_channels, out_channels=DISC_FIRST_CHANNEL, kernel_size=1, stride=1))
-        in_size = IMG_SIZE
+        self.module_list.append(Conv2d(in_channels=in_channels, out_channels=disc_first_channel, kernel_size=1, stride=1))
+        in_size = img_size
         cnt = 0
         while True:
             cnt += 1
             in_channels = out_channels
             out_channels *= 2
-            if in_size == DISC_LAST_SIZE:
+            if in_size == disc_last_size:
                 break
             self.module_list.append(ResidualBlock(in_channels, out_channels))
-            if cnt in DISC_NON_LOCAL_LOC_V2:
+            if cnt == disc_nonlocal_loc:
                 print('disc: non_local block inserted')
                 self.module_list.append(Non_Local(out_channels))
             in_size //= 2
@@ -53,9 +59,9 @@ class Discriminator(Module):
         self.module_list.append(PReLU())
         self.module_list.append(Flatten())
         self.module_list.append(Linear(in_channels, 1))
-        self.opt = Adam(self.parameters(), lr=DISC_LR, betas=DISC_BETAS)
+        self.to(device)
+        self.opt = Adam(self.parameters(), lr=disc_lr, betas=BETAS)
         self.apply(init_weights)
-        self.to(DEVICE)
 
     def forward(self, x):
         for m in self.module_list:
@@ -97,12 +103,13 @@ class _ModulatedConv(Module):
         return x
 
 class ModulatedConvBlock(Module):
-    def __init__(self, in_channels, out_channels, kernel_size, up=False, out=False):
+    def __init__(self, in_channels, out_channels, kernel_size, style_size, use_gpu, up, out):
         #up: upsamplex2?
         #out: RGB out?
         super().__init__()
+        self.use_gpu = use_gpu
         self.up = up
-        self.style_affine = Linear(STYLE_SIZE, in_channels)
+        self.style_affine = Linear(style_size, in_channels)
         self.modulated_conv = _ModulatedConv(in_channels, out_channels, kernel_size)
         self.noise_scalar = torch.nn.Parameter(torch.zeros(out_channels).view(1, out_channels, 1, 1))
         if out:
@@ -122,6 +129,10 @@ class ModulatedConvBlock(Module):
             x = F.interpolate(x, scale_factor=2, mode='bilinear', align_corners=True)
         img_size = x.size(2)
         noise = make_noise_img(batch_size, img_size)
+        if self.use_gpu:
+            noise = noise.cuda()
+        else:
+            noise = noise.cpu()
         x = self.modulated_conv(x, style_std)
         x = x + self.noise_scalar*noise
         if self.out:
@@ -133,31 +144,38 @@ class ModulatedConvBlock(Module):
             return x
 
 class Generator(Module):
-    def __init__(self):
+    def __init__(self, gen_channel, texture_size, style_size, gen_nonlocal_loc, gen_lr, img_size, device):
         super().__init__()
-        self.basic_texture = torch.nn.Parameter(torch.rand(GEN_CHANNEL, TEXTURE_SIZE, TEXTURE_SIZE))
+        if device == 'cpu':
+            use_gpu = False
+        elif 'cuda:' in device:
+            use_gpu = True
+        else:
+            assert Exception('invalid argument in Network2.Generator')
+        self.img_size = img_size
+        self.basic_texture = torch.nn.Parameter(torch.rand(gen_channel, texture_size, texture_size))
         self.module_list = ModuleList()
-        first_block = ModulatedConvBlock(GEN_CHANNEL, GEN_CHANNEL, kernel_size=3, up=False, out=True)
+        first_block = ModulatedConvBlock(gen_channel, gen_channel, 3, style_size, use_gpu, up=False, out=True)
         self.module_list.append(first_block)
-        in_size = 2*TEXTURE_SIZE
-        in_channels = GEN_CHANNEL
+        in_size = 2*texture_size
+        in_channels = gen_channel
         cnt = 0
         while True:
             cnt += 1
-            former = ModulatedConvBlock(in_channels, in_channels, kernel_size=3, up=True, out=False)
-            latter = ModulatedConvBlock(in_channels, in_channels//2, kernel_size=3, up=False, out=True)
+            former = ModulatedConvBlock(in_channels, in_channels, 3, style_size, use_gpu, up=True, out=False)
+            latter = ModulatedConvBlock(in_channels, in_channels//2, 3, style_size, use_gpu, up=False, out=True)
             self.module_list.append(former)
             self.module_list.append(latter)
-            if cnt in GEN_NON_LOCAL_LOC_V2:
+            if cnt == gen_nonlocal_loc:
                 print('gen: non_local block inserted')
                 self.module_list.append(Non_Local(in_channels//2))
             in_size *= 2
             in_channels //= 2
-            if in_size > IMG_SIZE:
+            if in_size > img_size:
                 break
-        self.opt = Adam(self.parameters(), lr=GEN_LR, betas=GEN_BETAS)
+        self.to(device)
+        self.opt = Adam(self.parameters(), lr=gen_lr, betas=BETAS)
         self.apply(init_weights)
-        self.to(DEVICE)
 
     def forward(self, style_base):
         img = None
@@ -172,14 +190,14 @@ class Generator(Module):
                     img = rgb
                 else:
                     img = img + rgb
-                if x.size(2) == IMG_SIZE:
+                if x.size(2) == self.img_size:
                     #last layer doesn't need bilinear upsampling!
                     break
                 img = F.interpolate(img, scale_factor=2, mode='bilinear', align_corners=True)
             elif m.name == 'NON_LOCAL':
                 x = m(x)
             else:
-                raise NotImplementedError(m.name,'what are you doing!')
+                raise NotImplementedError(m.name,'in generator, unknown block name')
         img = torch.clamp(img, min=0, max=1)
         #img = torch.sigmoid(img)
         return img

@@ -5,7 +5,12 @@ from torch.nn import Linear, Conv2d, UpsamplingBilinear2d, AvgPool2d, PReLU, Fla
 from torch.nn import Module, ModuleList, Sequential
 from torch.nn.utils import spectral_norm
 from torch.optim import Adam
-from config import *
+
+BETAS = (0, 0.99)
+
+#constant
+ROOT_2 = 1.41421
+ln2 = 0.69314
 
 def init_weights(m):
     if type(m) == Linear or type(m) == Conv2d:
@@ -17,7 +22,7 @@ def make_noise_img(batch_size, size):
     noise = np.where(noise > 1, 1, noise)
     noise = np.where(noise < 0, 0, noise)
     noise = np.tile(noise, (batch_size, 1, 1, 1))
-    return torch.as_tensor(noise, dtype=torch.float32, device=DEVICE)
+    return torch.as_tensor(noise, dtype=torch.float32)
 
 def AdaIN(content, style):
     #content: (N,C,H,W) torch.FloatTensor
@@ -87,23 +92,25 @@ class Non_Local(Module):
 
 
 class Discriminator(Module):
-    def __init__(self):
+    def __init__(self, disc_first_channel, disc_last_size, disc_nonlocal_loc, disc_lr, img_size, device):
         super().__init__()
+        if not(device == 'cpu' or 'cuda:' in device):
+            assert Exception('invalid argument in Network2.Discriminator')
         self.module_list = ModuleList()
         in_channels = 3
-        out_channels = DISC_FIRST_CHANNEL
-        self.module_list.append(Conv2d(in_channels=in_channels, out_channels=DISC_FIRST_CHANNEL, kernel_size=1, stride=1))
+        out_channels = disc_first_channel
+        self.module_list.append(Conv2d(in_channels=in_channels, out_channels=disc_first_channel, kernel_size=1, stride=1))
         self.module_list.append(PReLU())
-        in_size = IMG_SIZE
+        in_size = img_size
         cnt = 0
         while True:
             cnt += 1
             in_channels = out_channels
             out_channels *= 2
-            if in_size == DISC_LAST_SIZE:
+            if in_size == disc_last_size:
                 break
             self.module_list.append(build_disc_convblock(in_channels, out_channels))
-            if cnt in DISC_NON_LOCAL_LOC_V1:
+            if cnt == disc_nonlocal_loc:
                 print('disc: non_local block inserted')
                 self.module_list.append(Non_Local(out_channels))
             in_size //= 2
@@ -114,9 +121,9 @@ class Discriminator(Module):
         self.module_list.append(PReLU())
         self.module_list.append(Flatten())
         self.module_list.append(Linear(in_channels, 1))
-        self.opt = Adam(self.parameters(), lr=DISC_LR, betas=DISC_BETAS)
+        self.to(device)
+        self.opt = Adam(self.parameters(), lr=disc_lr, betas=BETAS)
         self.apply(init_weights)
-        self.to(DEVICE)
 
 
     def forward(self, x):
@@ -125,17 +132,18 @@ class Discriminator(Module):
         return x
 
 class Generator_Conv(Module):
-    def __init__(self, in_channels, out_channels, kernel_size):
+    def __init__(self, in_channels, out_channels, kernel_size, style_size, use_gpu):
         super().__init__()
+        self.use_gpu = use_gpu
         self.upsample_layer = UpsamplingBilinear2d(scale_factor=2)
         self.out_channels = out_channels
         self.conv_1 = spectral_norm(Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, stride=1, padding=1))
         self.prelu_1 = PReLU()
         self.conv_2 = spectral_norm(Conv2d(in_channels=out_channels, out_channels=out_channels, kernel_size=kernel_size, stride=1, padding=1))
         self.prelu_2 = PReLU()
-        self.style_affine_1 = spectral_norm(Linear(STYLE_SIZE, in_channels))
+        self.style_affine_1 = spectral_norm(Linear(style_size, in_channels))
         self.noise_scaler_1 = torch.nn.Parameter(torch.zeros(out_channels).view(1, out_channels, 1, 1))
-        self.style_affine_2 = spectral_norm(Linear(STYLE_SIZE, in_channels))
+        self.style_affine_2 = spectral_norm(Linear(style_size, in_channels))
         self.noise_scaler_2 = torch.nn.Parameter(torch.zeros(out_channels).view(1, out_channels, 1, 1))
 
     def forward(self, content, style_base):
@@ -143,6 +151,10 @@ class Generator_Conv(Module):
         H = content.size(2)
         W = content.size(3)
         noise = make_noise_img(batch_size, (2*H, 2*W))
+        if self.use_gpu:
+            noise = noise.cuda()
+        else:
+            noise = noise.cpu()
         content = self.upsample_layer(content)
         content = self.prelu_1(self.conv_1(content))
         content = content + self.noise_scaler_1*noise
@@ -154,20 +166,22 @@ class Generator_Conv(Module):
 
 
 class StyleMapper(Module):
-    def __init__(self):
+    def __init__(self, z_size, style_size, mapping_lr, device):
         super().__init__()
+        if not(device == 'cpu' or 'cuda:' in device):
+            assert Exception('invalid argument in Network1.StyleMapper')
         self.styleblock = Sequential(
-            spectral_norm(Linear(Z_SIZE, STYLE_SIZE//4)),
+            spectral_norm(Linear(z_size, style_size//4)),
             PReLU(),
-            spectral_norm(Linear(STYLE_SIZE//4, STYLE_SIZE//2)),
+            spectral_norm(Linear(style_size//4, style_size//2)),
             PReLU(),
-            spectral_norm(Linear(STYLE_SIZE//2, STYLE_SIZE)),
+            spectral_norm(Linear(style_size//2, style_size)),
             PReLU(),
-            spectral_norm(Linear(STYLE_SIZE, STYLE_SIZE)),
+            spectral_norm(Linear(style_size, style_size)),
         )
-        self.opt = Adam(self.parameters(), lr=MAPPING_LR, betas=GEN_BETAS)
+        self.to(device)
+        self.opt = Adam(self.parameters(), lr=mapping_lr, betas=BETAS)
         self.apply(init_weights)
-        self.to(DEVICE)
 
 
     def forward(self, z):
@@ -175,44 +189,55 @@ class StyleMapper(Module):
         return style_base
 
 class Generator(Module):
-    def __init__(self):
+    def __init__(self, gen_channel, texture_size, style_size, gen_nonlocal_loc, gen_lr, img_size, device):
         super().__init__()
-        self.basic_texture = torch.nn.Parameter(torch.rand(GEN_CHANNEL, TEXTURE_SIZE, TEXTURE_SIZE))
-        self.conv = spectral_norm(Conv2d(in_channels=GEN_CHANNEL, out_channels=GEN_CHANNEL, kernel_size=3, stride=1, padding=1))
+        if device == 'cpu':
+            self.use_gpu = False
+        elif 'cuda:' in device:
+            self.use_gpu = True
+        else:
+            assert Exception('invalid argument in Network2.Generator')
+        self.gen_channel = gen_channel
+        self.basic_texture = torch.nn.Parameter(torch.rand(gen_channel, texture_size, texture_size))
+        self.conv = spectral_norm(Conv2d(in_channels=gen_channel, out_channels=gen_channel, kernel_size=3, stride=1, padding=1))
         self.prelu = PReLU()
-        self.style_affine_1 = spectral_norm(Linear(STYLE_SIZE, GEN_CHANNEL*2))
-        self.noise_scaler_1 = torch.nn.Parameter(torch.zeros(GEN_CHANNEL).view(1, GEN_CHANNEL, 1, 1))
-        self.style_affine_2 = spectral_norm(Linear(STYLE_SIZE, GEN_CHANNEL*2))
-        self.noise_scaler_2 = torch.nn.Parameter(torch.zeros(GEN_CHANNEL).view(1, GEN_CHANNEL, 1, 1))
+        self.style_affine_1 = spectral_norm(Linear(style_size, gen_channel*2))
+        self.noise_scaler_1 = torch.nn.Parameter(torch.zeros(gen_channel).view(1, gen_channel, 1, 1))
+        self.style_affine_2 = spectral_norm(Linear(style_size, gen_channel*2))
+        self.noise_scaler_2 = torch.nn.Parameter(torch.zeros(gen_channel).view(1, gen_channel, 1, 1))
         self.module_list = ModuleList()
-        in_channels = GEN_CHANNEL
+        in_channels = gen_channel
         in_size = 4
         cnt = 0
         while True:
             cnt += 1
-            self.module_list.append(Generator_Conv(in_channels, in_channels//2, 3))
-            if cnt in GEN_NON_LOCAL_LOC_V1:
+            self.module_list.append(Generator_Conv(in_channels, in_channels//2, 3, style_size, self.use_gpu))
+            if cnt == gen_nonlocal_loc:
                 print('gen: non_local block inserted')
                 self.module_list.append(Non_Local(in_channels//2))
             in_channels //= 2
             in_size *= 2
-            if in_size >= IMG_SIZE:
+            if in_size >= img_size:
                 break
         self.last_layer = spectral_norm(Conv2d(in_channels=in_channels, out_channels=3, kernel_size=1, stride=1))
-        self.opt = Adam(self.parameters(), lr=GEN_LR, betas=GEN_BETAS)
+        self.to(device)
+        self.opt = Adam(self.parameters(), lr=gen_lr, betas=BETAS)
         self.apply(init_weights)
-        self.to(DEVICE)
 
 
     def forward(self, style_base):
         batch_size = style_base.size()[0]
         x = self.basic_texture.repeat(batch_size, 1, 1, 1)
         noise = make_noise_img(batch_size, 4)
+        if self.use_gpu:
+            noise = noise.cuda()
+        else:
+            noise = noise.cpu()
         x = x + self.noise_scaler_1*noise
-        x = AdaIN(x, self.style_affine_1(style_base).view(-1, 2*GEN_CHANNEL, 1, 1))
+        x = AdaIN(x, self.style_affine_1(style_base).view(-1, 2*self.gen_channel, 1, 1))
         x = self.prelu(self.conv(x))
         x = x + self.noise_scaler_2*noise
-        x = AdaIN(x, self.style_affine_2(style_base).view(-1, 2*GEN_CHANNEL, 1, 1))
+        x = AdaIN(x, self.style_affine_2(style_base).view(-1, 2*self.gen_channel, 1, 1))
         for m in self.module_list:
             if type(m) != Non_Local:
                 x = m(x, style_base)

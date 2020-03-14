@@ -5,20 +5,20 @@ import torchvision.transforms.functional as TF
 import torchvision.transforms as T
 from PIL import Image
 from torch.utils.data import Dataset
-from config import *
 
-
+#basic transformation for our dataset
+BASIC_TRANSFORM = T.Compose([T.RandomHorizontalFlip(), T.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2)])
 
 class TANOCIv2_Dataset(Dataset):
-    def __init__(self, transform=BASIC_TRANSFORM):
+    def __init__(self, img_size, dataset_path, transform):
         #transform only has to contain data augmentating transformation
         super().__init__()
-        self.img_size = IMG_SIZE
+        self.img_size = img_size
         self.img_list = []
         self.transform = transform
-        dir_list = [i for i in os.listdir(DATASET_PATH) if i != 'list.txt'] 
+        dir_list = [i for i in os.listdir(dataset_path) if i != 'list.txt'] 
         for dir_name in dir_list:
-            base_path = os.path.join(DATASET_PATH, dir_name)
+            base_path = os.path.join(dataset_path, dir_name)
             tmp_img_list = os.listdir(base_path)
             for img_name in tmp_img_list:
                 path = os.path.join(base_path, img_name)
