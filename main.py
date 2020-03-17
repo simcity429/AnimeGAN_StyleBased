@@ -5,10 +5,11 @@ import torch.nn.functional as F
 import torchvision.transforms as T
 import Networkv1
 import Networkv2
+from copy import deepcopy
 from torchvision.utils import make_grid, save_image
 from torch.utils.data import DataLoader
 from torch.distributions import MultivariateNormal
-from torch.nn import BCEWithLogitsLoss, DataParallel
+from torch.nn import Module, DataParallel
 from CustomDataset import TANOCIv2_Dataset
 
 #constant
@@ -18,10 +19,18 @@ ln2 = 0.69314
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
+def averaging_param(old_params:list, current_params:list, tau:int=0.999):
+    for old_param, current_param in zip(old_params, current_params):
+        current_param.data.copy_(
+            current_param.data * (1.0 - tau) + old_param.data * tau
+        )
+
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     #general arguments
+    parser.add_argument('--load_index', default=0)
     parser.add_argument('--version', default=2)
     parser.add_argument('--lir', required=True)
     parser.add_argument('--device', default='cuda:0')
@@ -36,6 +45,7 @@ if __name__ == '__main__':
     parser.add_argument('--pl_cov', default=0.1)
     parser.add_argument('--interpolate_num', default=8)
     parser.add_argument('--ema_decay', default=0.99)
+    parser.add_argument('--ema_start', default=100000)
 
     #generator arguments
     parser.add_argument('--style_size', default=64)
@@ -55,6 +65,7 @@ if __name__ == '__main__':
     parser.add_argument('--gp_coef', default=10)
     args = parser.parse_args()
 
+    load_index = int(args.load_index)
     version = int(args.version)
     if args.lir == "True" or args.lir == "true":
         lir = True
@@ -77,6 +88,7 @@ if __name__ == '__main__':
     pl_cov = float(args.pl_cov)
     interpolate_num = int(args.interpolate_num)
     ema_decay = float(args.ema_decay)
+    ema_start = int(args.ema_start)
 
     style_size = int(args.style_size)
     z_size = int(args.z_size)
@@ -119,6 +131,15 @@ if __name__ == '__main__':
     else:
         raise Exception('invalid version')
 
+    if load_index != 0:
+        print('loading', load_index, 'models...')
+        S_load_path = save_path + '_weight/' + str(load_index) + 'S.pt'
+        G_load_path = save_path + '_weight/' + str(load_index) + 'G.pt'
+        D_load_path = save_path + '_weight/' + str(load_index) + 'D.pt'
+        S.load_state_dict(torch.load(S_load_path))
+        G.load_state_dict(torch.load(G_load_path))
+        D.load_state_dict(torch.load(D_load_path))
+        print('loading complete!')
     if torch.cuda.device_count() > 1 and use_multi_gpu:
         print('Using ', torch.cuda.device_count(), 'GPUs...')
         S = DataParallel(S)
@@ -138,8 +159,7 @@ if __name__ == '__main__':
         dist = MultivariateNormal(loc=torch.zeros(batch_size, z_size), covariance_matrix=z_cov*torch.eye(z_size))
     pl_dist = MultivariateNormal(loc=torch.zeros(batch_size, 3*img_size*img_size), covariance_matrix=pl_cov*torch.eye(3*img_size*img_size))
     previous_grads_norm = 0
-    step_cnt = 1
-    verbose_cnt = verbose_freq - 1
+    step_cnt = 1 + verbose_freq*load_index
     for e in range(epoch):
         for real in dataloader:
             real = real.to(device)
@@ -153,7 +173,7 @@ if __name__ == '__main__':
                 v_len = np.sqrt(np.sum(v**2, axis=1, keepdims=True))
                 v /= v_len
                 v = v.reshape(batch_size//interpolate_num,z_size,1)
-                epsilon = np.random.normal(0, 1, size=(batch_size//interpolate_num, interpolate_num)).reshape((batch_size//interpolate_num,1,interpolate_num))
+                epsilon = np.random.normal(2.74, 0.7, size=(batch_size//interpolate_num, interpolate_num)).reshape((batch_size//interpolate_num,1,interpolate_num))
                 v = v*epsilon
                 v = v.transpose((0,2,1)).reshape(batch_size, -1)
                 z = torch.FloatTensor(v).to(device)[:real_batch_size]
@@ -164,7 +184,7 @@ if __name__ == '__main__':
             real_out = D(real)
             fake_out = D(fake)
             d_loss = -(torch.mean(real_out) - torch.mean(fake_out))
-            print('epoch:', e, 'd_loss', d_loss)
+            print('epoch:', e, 'step: ', step_cnt, 'd_loss', d_loss)
             #gradient penalty for WGAN_GP
             epsilon = torch.rand(real_batch_size, 1, 1, 1).to(device)
             interpolated = epsilon*fake + (1-epsilon)*real
@@ -186,11 +206,19 @@ if __name__ == '__main__':
             if torch.cuda.device_count() > 1 and use_multi_gpu:
                 D.module.opt.step()
             else:
-                D.opt.step() 
+                D.opt.step()
             #g_update
+            if torch.cuda.device_count() > 1 and use_multi_gpu:
+                if step_cnt > ema_start:
+                    S_old_params = [p.clone().detach() for p in S.module.parameters()]
+                    G_old_parmas = [p.clone().detach() for p in G.module.parameters()]
+            else:
+                if step_cnt > ema_start:
+                    S_old_params = [p.clone().detach() for p in S.parameters()]
+                    G_old_parmas = [p.clone().detach() for p in G.parameters()]
             fake_out = D(G_fake)
             g_loss = -torch.mean(fake_out)
-            print('epoch:', e, '!!!g_loss', g_loss)
+            print('epoch:', e, 'step: ', step_cnt, '!!!g_loss', g_loss)
             if step_cnt % gen_lazy == 0 and version == 2:
                 #path length Regulation
                 y = pl_dist.sample().to(device)[:real_batch_size]
@@ -209,7 +237,7 @@ if __name__ == '__main__':
                 previous_grads_norm = previous_grads_norm*ema_decay + (1-ema_decay)*current_grads_norm
                 print('a:', previous_grads_norm)
                 g_loss += ema_coef*grad_penalty
-            if torch.cuda.device_count() > 1 and use_multi_gpu:                        
+            if torch.cuda.device_count() > 1 and use_multi_gpu:                     
                 S.module.opt.zero_grad()
                 G.module.opt.zero_grad()
             else:
@@ -219,14 +247,23 @@ if __name__ == '__main__':
             if torch.cuda.device_count() > 1 and use_multi_gpu:
                 S.module.opt.step()
                 G.module.opt.step()
+                if step_cnt > ema_start:
+                    S_current_params = [p for p in S.module.parameters()]
+                    G_current_params = [p for p in G.module.parameters()]
+                    averaging_param(S_old_params, S_current_params)
+                    averaging_param(G_old_parmas, G_current_params)
             else:
                 S.opt.step()
                 G.opt.step()
-            step_cnt += 1
-            verbose_cnt += 1
-            if verbose_cnt % verbose_freq == 0:
+                if step_cnt > ema_start:
+                    print('step ', step_cnt, 'averaging param applied...')
+                    S_current_params = [p for p in S.parameters()]
+                    G_current_params = [p for p in G.parameters()]
+                    averaging_param(S_old_params, S_current_params)
+                    averaging_param(G_old_parmas, G_current_params)
+            if step_cnt == 1 or step_cnt % verbose_freq == 0:
                 img_save_path = save_path + '_img/'
-                index = str(verbose_cnt//verbose_freq)
+                index = str(step_cnt//verbose_freq)
                 vis_fake = G(S(visual_seed)).detach()
                 save_image(make_grid(vis_fake), img_save_path + index + '.jpg')
                 save_image(make_grid(vis_fake), args.lir + '.jpg')
@@ -235,3 +272,4 @@ if __name__ == '__main__':
                     torch.save(S.state_dict(), weight_save_path + index + 'S.pt')
                     torch.save(G.state_dict(), weight_save_path + index +  'G.pt')
                     torch.save(D.state_dict(), weight_save_path + index + 'D.pt')
+            step_cnt += 1
