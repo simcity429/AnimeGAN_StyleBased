@@ -42,10 +42,9 @@ if __name__ == '__main__':
     parser.add_argument('--verbose_freq', default=100)
     parser.add_argument('--save_freq', default=10)
     parser.add_argument('--z_cov', default=1)
-    parser.add_argument('--pl_cov', default=0.1)
     parser.add_argument('--interpolate_num', default=8)
     parser.add_argument('--ema_decay', default=0.99)
-    parser.add_argument('--ema_start', default=100000)
+    parser.add_argument('--ema_start', default=50000)
 
     #generator arguments
     parser.add_argument('--style_size', default=64)
@@ -85,7 +84,6 @@ if __name__ == '__main__':
     verbose_freq = int(args.verbose_freq)
     save_freq = int(args.save_freq)
     z_cov = float(args.z_cov)
-    pl_cov = float(args.pl_cov)
     interpolate_num = int(args.interpolate_num)
     ema_decay = float(args.ema_decay)
     ema_start = int(args.ema_start)
@@ -157,7 +155,8 @@ if __name__ == '__main__':
     #baseline
     if not lir:
         dist = MultivariateNormal(loc=torch.zeros(batch_size, z_size), covariance_matrix=z_cov*torch.eye(z_size))
-    pl_dist = MultivariateNormal(loc=torch.zeros(batch_size, 3*img_size*img_size), covariance_matrix=pl_cov*torch.eye(3*img_size*img_size))
+    else:
+        epsilon_dist = MultivariateNormal(loc=torch.zeros(batch_size, z_size), covariance_matrix=torch.eye(z_size))
     previous_grads_norm = 0
     step_cnt = 1 + verbose_freq*load_index
     for e in range(epoch):
@@ -173,7 +172,8 @@ if __name__ == '__main__':
                 v_len = np.sqrt(np.sum(v**2, axis=1, keepdims=True))
                 v /= v_len
                 v = v.reshape(batch_size//interpolate_num,z_size,1)
-                epsilon = np.random.normal(2.74, 0.7, size=(batch_size//interpolate_num, interpolate_num)).reshape((batch_size//interpolate_num,1,interpolate_num))
+                epsilon  = epsilon_dist.sample().numpy()
+                epsilon = np.sqrt(np.sum(epsilon**2, axis=1)).reshape((batch_size//interpolate_num, 1, interpolate_num))
                 v = v*epsilon
                 v = v.transpose((0,2,1)).reshape(batch_size, -1)
                 z = torch.FloatTensor(v).to(device)[:real_batch_size]
@@ -221,7 +221,7 @@ if __name__ == '__main__':
             print('epoch:', e, 'step: ', step_cnt, '!!!g_loss', g_loss)
             if step_cnt % gen_lazy == 0 and version == 2:
                 #path length Regulation
-                y = pl_dist.sample().to(device)[:real_batch_size]
+                y = torch.randn(real_batch_size, 3*img_size*img_size).to(device)
                 w = S(z)
                 Gw = G(w).view(real_batch_size, -1)
                 Jy = torch.bmm(Gw.view(real_batch_size, 1, -1), y.view(real_batch_size, -1, 1))
