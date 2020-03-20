@@ -55,7 +55,8 @@ class Discriminator(Module):
                 print('disc: non_local block inserted, in_size: ', in_size//2)
                 self.module_list.append(Non_Local(out_channels))
             in_size //= 2
-        self.module_list.append(Conv2d(in_channels=in_channels, out_channels=in_channels, kernel_size=4, stride=1, padding=0))
+        self.module_list.append(Minibatch_Stddev())
+        self.module_list.append(Conv2d(in_channels=in_channels+1, out_channels=in_channels, kernel_size=4, stride=1, padding=0))
         self.module_list.append(PReLU())
         self.module_list.append(Flatten())
         self.module_list.append(Linear(in_channels, 1))
@@ -97,7 +98,8 @@ class _ModulatedConv(Module):
         #[batch*Cout,Cin,H,W]
         x = x.view(1, -1, x.size(2), x.size(3))
         #[1,N*C,H,W]
-        x = F.conv2d(x, weight, groups=batch_size, padding=1)
+        padding_size = (self.weight.size(3)-1)//2
+        x = F.conv2d(x, weight, groups=batch_size, padding=padding_size)
         x = x.view(batch_size, out_channels, H, W) + self.bias
         x = self.prelu(x)
         return x
@@ -115,7 +117,7 @@ class ModulatedConvBlock(Module):
         if out:
             self.name = 'LATTER'
             self.out = True
-            self.out = Conv2d(out_channels, 3, 1)
+            self.out_conv = _ModulatedConv(out_channels, 3, 1)
         else:
             self.name = 'FORMER'
             self.out = False
@@ -138,7 +140,7 @@ class ModulatedConvBlock(Module):
         x = x + self.noise_scalar*noise
         if self.out:
             x = x.contiguous()
-            out = self.out(x)
+            out = self.out_conv(x, style_std[:,:x.size(1)])
             out = torch.clamp(out, min=0, max=1)
             return x, out
         else:
@@ -185,12 +187,14 @@ class Generator(Module):
 
     def forward(self, style_base):
         img = None
+        cnt = 0
         batch_size = style_base.size(0)
         x = self.basic_texture.repeat(batch_size, 1, 1, 1)
         for m in self.module_list:
             if m.name == 'FORMER':
                 x = m(x, style_base)
             elif m.name == 'LATTER':
+                cnt += 1
                 x, rgb = m(x, style_base)
                 if img is None:
                     img = rgb
@@ -204,6 +208,7 @@ class Generator(Module):
                 x = m(x)
             else:
                 raise NotImplementedError(m.name,'in generator, unknown block name')
+        img /= cnt
         img = torch.clamp(img, min=0, max=1)
         #img = torch.sigmoid(img)
         return img
