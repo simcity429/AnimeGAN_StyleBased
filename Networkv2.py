@@ -5,7 +5,7 @@ from torch.nn import Linear, Conv2d, UpsamplingBilinear2d, AvgPool2d, PReLU, Fla
 from torch.nn import Module, ModuleList, Sequential
 from torch.nn.utils import spectral_norm
 from torch.optim import Adam
-from Networkv1 import make_noise_img, build_disc_convblock, StyleMapper, Non_Local, Minibatch_Stddev
+from Networkv1 import make_noise_img, Weight_Scaling, Disc_Conv, StyleMapper, Non_Local, Minibatch_Stddev
 
 BETAS = (0, 0.99)
 
@@ -15,20 +15,21 @@ ln2 = 0.69314
 
 def init_weights(m):
     if type(m) == Linear or type(m) == Conv2d or type(m) == _ModulatedConv:
-        torch.nn.init.orthogonal_(m.weight)
+        torch.nn.init.normal_(m.weight)
         m.bias.data.fill_(0)
 
 class ResidualBlock(Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
-        self.disc_block = build_disc_convblock(in_channels, out_channels)
+        self.disc_block = Disc_Conv(in_channels, out_channels)
+        self.weight_scaling = Weight_Scaling(in_channels*3*3)
         self.conv = Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=1, stride=1)
 
     def forward(self, x):
         t = x
         x = self.disc_block(x)
         t = t.contiguous()
-        t = F.avg_pool2d(self.conv(t), kernel_size=2, stride=2)
+        t = F.avg_pool2d(self.conv(self.weight_scaling(t)), kernel_size=2, stride=2)
         x = (x + t)/ROOT_2
         return x
 
@@ -41,6 +42,7 @@ class Discriminator(Module):
         in_channels = 3
         out_channels = disc_first_channel
         #fromRGB
+        self.module_list.append(Weight_Scaling(in_channels*1*1))
         self.module_list.append(Conv2d(in_channels=in_channels, out_channels=disc_first_channel, kernel_size=1, stride=1))
         in_size = img_size
         cnt = 0
@@ -56,9 +58,11 @@ class Discriminator(Module):
                 self.module_list.append(Non_Local(out_channels))
             in_size //= 2
         self.module_list.append(Minibatch_Stddev())
+        self.module_list.append(Weight_Scaling((in_channels+1)*4*4))
         self.module_list.append(Conv2d(in_channels=in_channels+1, out_channels=in_channels, kernel_size=4, stride=1, padding=0))
         self.module_list.append(PReLU())
         self.module_list.append(Flatten())
+        self.module_list.append(Weight_Scaling(in_channels))
         self.module_list.append(Linear(in_channels, 1))
         self.to(device)
         self.opt = Adam(self.parameters(), lr=disc_lr, betas=BETAS)
@@ -111,6 +115,7 @@ class ModulatedConvBlock(Module):
         super().__init__()
         self.use_gpu = use_gpu
         self.up = up
+        self.style_scaling = Weight_Scaling(style_size)
         self.style_affine = Linear(style_size, in_channels)
         self.modulated_conv = _ModulatedConv(in_channels, out_channels, kernel_size)
         self.noise_scalar = torch.nn.Parameter(torch.zeros(out_channels).view(1, out_channels, 1, 1))
@@ -126,7 +131,7 @@ class ModulatedConvBlock(Module):
         #x: [N,C,H,W]
         #style_base: [N,STYLE_SIZE]
         batch_size = x.size(0)
-        style_std = self.style_affine(style_base)+1
+        style_std = self.style_affine(self.style_scaling(style_base))+1
         if self.up:
             x = F.interpolate(x, scale_factor=2, mode='bilinear', align_corners=True)
         img_size = x.size(2)
@@ -156,7 +161,7 @@ class Generator(Module):
         else:
             assert Exception('invalid argument in Network2.Generator')
         self.img_size = img_size
-        self.basic_texture = torch.nn.Parameter(torch.rand(gen_channel, texture_size, texture_size))
+        self.basic_texture = torch.nn.Parameter(torch.ones(gen_channel, texture_size, texture_size))
         self.module_list = ModuleList()
         first_block = ModulatedConvBlock(gen_channel, gen_channel, 3, style_size, use_gpu, up=False, out=True)
         self.module_list.append(first_block)
@@ -208,9 +213,7 @@ class Generator(Module):
                 x = m(x)
             else:
                 raise NotImplementedError(m.name,'in generator, unknown block name')
-        img /= cnt
-        img = torch.clamp(img, min=0, max=1)
-        #img = torch.sigmoid(img)
+        img = torch.sigmoid(img)
         return img
 
 

@@ -52,15 +52,15 @@ if __name__ == '__main__':
     parser.add_argument('--texture_size', default=4)
     parser.add_argument('--gen_channel', default=256)
     parser.add_argument('--gen_nonlocal_loc', default=2)
-    parser.add_argument('--gen_lr', default=0.0001)
-    parser.add_argument('--mapping_lr', default=0.00001)
+    parser.add_argument('--gen_lr', default=0.001)
+    parser.add_argument('--mapping_lr_ratio', default=0.01)
     parser.add_argument('--gen_lazy', default=8)
 
     #discriminator arguments
     parser.add_argument('--disc_first_channel', default=16)
     parser.add_argument('--disc_last_size', default=4)
     parser.add_argument('--disc_nonlocal_loc', default=2)
-    parser.add_argument('--disc_lr', default=0.0004)
+    parser.add_argument('--disc_lr', default=0.002)
     parser.add_argument('--gp_coef', default=10)
     args = parser.parse_args()
 
@@ -94,7 +94,7 @@ if __name__ == '__main__':
     gen_channel = int(args.gen_channel)
     gen_nonlocal_loc = int(args.gen_nonlocal_loc)
     gen_lr = float(args.gen_lr)
-    mapping_lr = float(args.mapping_lr)
+    mapping_lr = float(args.mapping_lr_ratio)*gen_lr
     gen_lazy = int(args.gen_lazy)
     ema_coef = (gen_lazy*ln2)/((img_size**2)*(img_level-1)*ln2)
 

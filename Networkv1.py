@@ -14,7 +14,7 @@ ln2 = 0.69314
 
 def init_weights(m):
     if type(m) == Linear or type(m) == Conv2d:
-        torch.nn.init.orthogonal_(m.weight)
+        torch.nn.init.normal_(m.weight)
         m.bias.data.fill_(0)
 
 def make_noise_img(batch_size, size):
@@ -37,15 +37,38 @@ def AdaIN(content, style):
     out = (style_std + 1)*((content - content_mean)/content_std) + style_mean
     return out
     
-def build_disc_convblock(in_channels, out_channels):
-     return Sequential(
-         Conv2d(in_channels=in_channels, out_channels=in_channels, kernel_size=3, stride=1, padding=1),
-         PReLU(),
-         Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=3, stride=1, padding=1),
-         PReLU(),
-         AvgPool2d(kernel_size=2, stride=2),
-     )
 
+class Weight_Scaling(Module):
+    def __init__(self, fan_in):
+        super().__init__()
+        self.kaiming_const = float(ROOT_2/np.sqrt(fan_in))
+
+    def forward(self, x):
+        return self.kaiming_const*x
+
+class Disc_Conv(Module):
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.weight_scaling_1 = Weight_Scaling(in_channels*3*3)
+        self.conv_1 = Conv2d(in_channels=in_channels, out_channels=in_channels, kernel_size=3, stride=1, padding=1)
+        self.prelu_1 = PReLU()
+        self.weight_scaling_2 = Weight_Scaling(in_channels*3*3)
+        self.conv_2 = Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=3, stride=1, padding=1)
+        self.prelu_2 = PReLU()
+        self.avgpool2d = AvgPool2d(kernel_size=2, stride=2)
+
+    def forward(self, x):
+        #for equalized learning rate
+        x = self.weight_scaling_1(x)
+        x = self.conv_1(x)
+        x = self.prelu_1(x)
+        x = self.weight_scaling_2(x)
+        x = self.conv_2(x)
+        x = self.prelu_2(x)
+        x = self.avgpool2d(x)
+        return x
 
 class Minibatch_Stddev(Module):
     def __init__(self):
@@ -71,21 +94,25 @@ class Non_Local(Module):
         super().__init__()
         assert in_channels % div_num == 0, "The remainder of 'in_ch/div_num' must be zero."
         self.name = 'NON_LOCAL'
+        self.weight_scaling_1 = Weight_Scaling(in_channels*1*1)
         self.q_conv1x1 = spectral_norm(Conv2d(in_channels, in_channels//div_num, kernel_size=1))
         self.k_conv1x1 = spectral_norm(Conv2d(in_channels, in_channels//div_num, kernel_size=1))
         self.v_conv1x1 = spectral_norm(Conv2d(in_channels, in_channels//div_num, kernel_size=1))
+        self.weight_scaling_2 = Weight_Scaling((in_channels//div_num)*1*1)
         self.sa_conv1x1 = spectral_norm(Conv2d(in_channels//div_num, in_channels, kernel_size=1))
         self.gamma = torch.nn.Parameter(torch.zeros(1))
 
     def forward(self, x):
         batch_size, c, h, w = x.size()
         x = x.contiguous()
+        x = self.weight_scaling_1(x)
         q = self.q_conv1x1(x).view(batch_size, -1, h*w)
         k = self.k_conv1x1(x).view(batch_size, -1, h*w)
         v = self.v_conv1x1(x).view(batch_size, -1, h*w)
 
         attn_map = F.softmax(torch.bmm(q.permute(0,2,1), k), dim=-1)
         sa_map = torch.bmm(v, attn_map.permute(0,2,1))
+        sa_map = self.weight_scaling_2(sa_map)
         sa_map = sa_map.contiguous()
         sa_map = self.sa_conv1x1(sa_map.view(batch_size, -1, h, w))
         return self.gamma*sa_map + x
@@ -99,6 +126,7 @@ class Discriminator(Module):
         self.module_list = ModuleList()
         in_channels = 3
         out_channels = disc_first_channel
+        self.module_list.append(Weight_Scaling(in_channels*1*1))
         self.module_list.append(Conv2d(in_channels=in_channels, out_channels=disc_first_channel, kernel_size=1, stride=1))
         self.module_list.append(PReLU())
         in_size = img_size
@@ -109,17 +137,20 @@ class Discriminator(Module):
             out_channels *= 2
             if in_size == disc_last_size:
                 break
-            self.module_list.append(build_disc_convblock(in_channels, out_channels))
+            self.module_list.append(Disc_Conv(in_channels, out_channels))
             if cnt == disc_nonlocal_loc:
                 print('disc: non_local block inserted, in_size: ', in_size//2)
                 self.module_list.append(Non_Local(out_channels))
             in_size //= 2
         self.module_list.append(Minibatch_Stddev())
+        self.module_list.append(Weight_Scaling((in_channels+1)*3*3))
         self.module_list.append(Conv2d(in_channels=in_channels+1, out_channels=in_channels, kernel_size=3, stride=1, padding=1))
         self.module_list.append(PReLU())
+        self.module_list.append(Weight_Scaling(in_channels*4*4))
         self.module_list.append(Conv2d(in_channels=in_channels, out_channels=in_channels, kernel_size=4, stride=1, padding=0))
         self.module_list.append(PReLU())
         self.module_list.append(Flatten())
+        self.module_list.append(Weight_Scaling(in_channels))
         self.module_list.append(Linear(in_channels, 1))
         self.to(device)
         self.opt = Adam(self.parameters(), lr=disc_lr, betas=BETAS)
@@ -137,10 +168,13 @@ class Generator_Conv(Module):
         self.use_gpu = use_gpu
         self.upsample_layer = UpsamplingBilinear2d(scale_factor=2)
         self.out_channels = out_channels
+        self.weight_scaling_1 = Weight_Scaling(in_channels*kernel_size*kernel_size)
         self.conv_1 = spectral_norm(Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, stride=1, padding=1))
         self.prelu_1 = PReLU()
+        self.weight_scaling_2 = Weight_Scaling(out_channels*kernel_size*kernel_size)
         self.conv_2 = spectral_norm(Conv2d(in_channels=out_channels, out_channels=out_channels, kernel_size=kernel_size, stride=1, padding=1))
         self.prelu_2 = PReLU()
+        self.style_scaling = Weight_Scaling(style_size)
         self.style_affine_1 = spectral_norm(Linear(style_size, in_channels))
         self.noise_scaler_1 = torch.nn.Parameter(torch.zeros(out_channels).view(1, out_channels, 1, 1))
         self.style_affine_2 = spectral_norm(Linear(style_size, in_channels))
@@ -157,12 +191,14 @@ class Generator_Conv(Module):
         else:
             noise = noise.cpu()
         content = self.upsample_layer(content)
+        content = self.weight_scaling_1(content)
         content = self.prelu_1(self.conv_1(content))
         content = content + self.noise_scaler_1*noise
-        content = AdaIN(content, self.style_affine_1(style_base).view(-1, 2*self.out_channels, 1, 1))
+        content = AdaIN(content, self.style_affine_1(self.style_scaling(style_base)).view(-1, 2*self.out_channels, 1, 1))
+        content = self.weight_scaling_2(content)
         content = self.prelu_2(self.conv_2(content))
         content = content + self.noise_scaler_2*noise
-        content = AdaIN(content, self.style_affine_2(style_base).view(-1, 2*self.out_channels, 1, 1))
+        content = AdaIN(content, self.style_affine_2(self.style_scaling(style_base)).view(-1, 2*self.out_channels, 1, 1))
         return content
 
 
@@ -172,12 +208,16 @@ class StyleMapper(Module):
         if not(device == 'cpu' or 'cuda:' in device):
             assert Exception('invalid argument in Network1.StyleMapper')
         self.styleblock = Sequential(
+            Weight_Scaling(z_size),
             spectral_norm(Linear(z_size, style_size//4)),
             PReLU(),
+            Weight_Scaling(style_size//4),
             spectral_norm(Linear(style_size//4, style_size//2)),
             PReLU(),
+            Weight_Scaling(style_size//2),
             spectral_norm(Linear(style_size//2, style_size)),
             PReLU(),
+            Weight_Scaling(style_size),
             spectral_norm(Linear(style_size, style_size)),
         )
         self.to(device)
@@ -200,8 +240,10 @@ class Generator(Module):
             assert Exception('invalid argument in Network2.Generator')
         self.gen_channel = gen_channel
         self.basic_texture = torch.nn.Parameter(torch.rand(gen_channel, texture_size, texture_size))
+        self.weight_scaling_1 = Weight_Scaling(gen_channel*3*3)
         self.conv = spectral_norm(Conv2d(in_channels=gen_channel, out_channels=gen_channel, kernel_size=3, stride=1, padding=1))
         self.prelu = PReLU()
+        self.style_scaling = Weight_Scaling(style_size)
         self.style_affine_1 = spectral_norm(Linear(style_size, gen_channel*2))
         self.noise_scaler_1 = torch.nn.Parameter(torch.zeros(gen_channel).view(1, gen_channel, 1, 1))
         self.style_affine_2 = spectral_norm(Linear(style_size, gen_channel*2))
@@ -220,6 +262,7 @@ class Generator(Module):
             in_size *= 2
             if in_size >= img_size:
                 break
+        self.weight_scaling_2 = Weight_Scaling(in_channels*1*1)
         self.last_layer = spectral_norm(Conv2d(in_channels=in_channels, out_channels=3, kernel_size=1, stride=1))
         self.to(device)
         self.opt = Adam(self.parameters(), lr=gen_lr, betas=BETAS)
@@ -236,15 +279,16 @@ class Generator(Module):
         else:
             noise = noise.cpu()
         x = x + self.noise_scaler_1*noise
-        x = AdaIN(x, self.style_affine_1(style_base).view(-1, 2*self.gen_channel, 1, 1))
-        x = self.prelu(self.conv(x))
+        x = AdaIN(x, self.style_affine_1(self.style_scaling(style_base)).view(-1, 2*self.gen_channel, 1, 1))
+        x = self.prelu(self.conv(self.weight_scaling_1(x)))
         x = x + self.noise_scaler_2*noise
-        x = AdaIN(x, self.style_affine_2(style_base).view(-1, 2*self.gen_channel, 1, 1))
+        x = AdaIN(x, self.style_affine_2(self.style_scaling(style_base)).view(-1, 2*self.gen_channel, 1, 1))
         for m in self.module_list:
             if type(m) != Non_Local:
                 x = m(x, style_base)
             else:
                 x = m(x)
+        x = self.weight_scaling_2(x)
         #fucking bug! pytorch1.4.0 has bug on conv with 1*1 kernel!
         x = x.contiguous()
         #above line fix the bug
