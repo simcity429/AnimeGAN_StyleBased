@@ -162,7 +162,7 @@ class Generator(Module):
         else:
             assert Exception('invalid argument in Network2.Generator')
         self.img_size = img_size
-        self.basic_texture = torch.nn.Parameter(torch.ones(gen_channel, texture_size, texture_size))
+        self.basic_texture = torch.nn.Parameter(torch.normal(torch.zeros(gen_channel, texture_size, texture_size), 1.0))
         self.module_list = ModuleList()
         first_block = ModulatedConvBlock(gen_channel, gen_channel, 3, style_size, use_gpu, up=False, out=True)
         self.module_list.append(first_block)
