@@ -116,14 +116,14 @@ class ModulatedConvBlock(Module):
         self.use_gpu = use_gpu
         self.up = up
         self.style_scaling = Weight_Scaling(style_size)
-        self.style_affine_1 = Linear(style_size, in_channels)
-        self.style_affine_2 = Linear(style_size, out_channels)
+        self.style_affine = Linear(style_size, in_channels)
         self.modulated_conv = _ModulatedConv(in_channels, out_channels, kernel_size)
         self.noise_scalar = torch.nn.Parameter(torch.zeros(out_channels).view(1, out_channels, 1, 1))
         if out:
             self.name = 'LATTER'
             self.out = True
-            self.out_conv = _ModulatedConv(out_channels, 3, 1)
+            self.out_weight_scale = Weight_Scaling(out_channels*1*1)
+            self.out_conv = Conv2d(out_channels, 3, 1)
         else:
             self.name = 'FORMER'
             self.out = False
@@ -132,7 +132,7 @@ class ModulatedConvBlock(Module):
         #x: [N,C,H,W]
         #style_base: [N,STYLE_SIZE]
         batch_size = x.size(0)
-        style_std = self.style_affine_1(self.style_scaling(style_base))+1
+        style_std = self.style_affine(self.style_scaling(style_base))+1
         if self.up:
             x = F.interpolate(x, scale_factor=2, mode='bilinear', align_corners=True)
         img_size = x.size(2)
@@ -146,8 +146,7 @@ class ModulatedConvBlock(Module):
         x = x + self.noise_scalar*noise
         if self.out:
             x = x.contiguous()
-            style_std = self.style_affine_2(self.style_scaling(style_base))+1
-            out = self.out_conv(x, style_std)
+            out = self.out_conv(self.out_weight_scale(x))
             out = torch.clamp(out, min=0, max=1)
             return x, out
         else:
