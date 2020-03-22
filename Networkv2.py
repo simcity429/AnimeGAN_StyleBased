@@ -214,7 +214,6 @@ class Generator(Module):
                 x = m(x)
             else:
                 raise NotImplementedError(m.name,'in generator, unknown block name')
-        img /= cnt
         img = torch.clamp(img, min=0, max=1)
         return img
 
