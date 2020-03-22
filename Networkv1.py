@@ -219,6 +219,18 @@ class StyleMapper(Module):
             PReLU(),
             Weight_Scaling(style_size),
             spectral_norm(Linear(style_size, style_size)),
+            PReLU(),
+            Weight_Scaling(style_size),
+            spectral_norm(Linear(style_size, style_size)),
+            PReLU(),
+            Weight_Scaling(style_size),
+            spectral_norm(Linear(style_size, style_size)),
+            PReLU(),
+            Weight_Scaling(style_size),
+            spectral_norm(Linear(style_size, style_size)),
+            PReLU(),
+            Weight_Scaling(style_size),
+            spectral_norm(Linear(style_size, style_size)),
         )
         self.to(device)
         self.opt = Adam(self.parameters(), lr=mapping_lr, betas=BETAS)

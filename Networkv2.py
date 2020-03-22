@@ -57,9 +57,9 @@ class Discriminator(Module):
                 print('disc: non_local block inserted, in_size: ', in_size//2)
                 self.module_list.append(Non_Local(out_channels))
             in_size //= 2
-        self.module_list.append(Minibatch_Stddev())
-        self.module_list.append(Weight_Scaling((in_channels+1)*4*4))
-        self.module_list.append(Conv2d(in_channels=in_channels+1, out_channels=in_channels, kernel_size=4, stride=1, padding=0))
+        #self.module_list.append(Minibatch_Stddev())
+        self.module_list.append(Weight_Scaling(in_channels*4*4))
+        self.module_list.append(Conv2d(in_channels=in_channels, out_channels=in_channels, kernel_size=4, stride=1, padding=0))
         self.module_list.append(PReLU())
         self.module_list.append(Flatten())
         self.module_list.append(Weight_Scaling(in_channels))
@@ -116,7 +116,8 @@ class ModulatedConvBlock(Module):
         self.use_gpu = use_gpu
         self.up = up
         self.style_scaling = Weight_Scaling(style_size)
-        self.style_affine = Linear(style_size, in_channels)
+        self.style_affine_1 = Linear(style_size, in_channels)
+        self.style_affine_2 = Linear(style_size, out_channels)
         self.modulated_conv = _ModulatedConv(in_channels, out_channels, kernel_size)
         self.noise_scalar = torch.nn.Parameter(torch.zeros(out_channels).view(1, out_channels, 1, 1))
         if out:
@@ -131,7 +132,7 @@ class ModulatedConvBlock(Module):
         #x: [N,C,H,W]
         #style_base: [N,STYLE_SIZE]
         batch_size = x.size(0)
-        style_std = self.style_affine(self.style_scaling(style_base))+1
+        style_std = self.style_affine_1(self.style_scaling(style_base))+1
         if self.up:
             x = F.interpolate(x, scale_factor=2, mode='bilinear', align_corners=True)
         img_size = x.size(2)
@@ -145,7 +146,8 @@ class ModulatedConvBlock(Module):
         x = x + self.noise_scalar*noise
         if self.out:
             x = x.contiguous()
-            out = self.out_conv(x, style_std[:,:x.size(1)])
+            style_std = self.style_affine_2(self.style_scaling(style_base))+1
+            out = self.out_conv(x, style_std)
             out = torch.clamp(out, min=0, max=1)
             return x, out
         else:
@@ -213,7 +215,8 @@ class Generator(Module):
                 x = m(x)
             else:
                 raise NotImplementedError(m.name,'in generator, unknown block name')
-        img = torch.sigmoid(img)
+        img /= cnt
+        img = torch.clamp(img, min=0, max=1)
         return img
 
 

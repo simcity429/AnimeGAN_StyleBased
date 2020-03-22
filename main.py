@@ -19,12 +19,9 @@ ln2 = 0.69314
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-def averaging_param(old_params:list, current_params:list, tau:int=0.999):
+def averaging_param(old_params:list, current_params:list, tau:float=0.9):
     for old_param, current_param in zip(old_params, current_params):
-        current_param.data.copy_(
-            current_param.data * (1.0 - tau) + old_param.data * tau
-        )
-
+        current_param.data = (current_param.data * (1.0 - tau) + old_param.data * tau).clone()
 
 
 if __name__ == '__main__':
