@@ -16,6 +16,7 @@ ln2 = 0.69314
 def init_weights(m):
     if type(m) == Linear or type(m) == Conv2d or type(m) == _ModulatedConv:
         torch.nn.init.normal_(m.weight)
+        #torch.nn.init.orthogonal_(m.weight)
         m.bias.data.fill_(0)
 
 class ResidualBlock(Module):
@@ -57,9 +58,9 @@ class Discriminator(Module):
                 print('disc: non_local block inserted, in_size: ', in_size//2)
                 self.module_list.append(Non_Local(out_channels))
             in_size //= 2
-        #self.module_list.append(Minibatch_Stddev())
-        self.module_list.append(Weight_Scaling(in_channels*4*4))
-        self.module_list.append(Conv2d(in_channels=in_channels, out_channels=in_channels, kernel_size=4, stride=1, padding=0))
+        self.module_list.append(Minibatch_Stddev())
+        self.module_list.append(Weight_Scaling((in_channels+1)*4*4))
+        self.module_list.append(Conv2d(in_channels=in_channels+1, out_channels=in_channels, kernel_size=4, stride=1, padding=0))
         self.module_list.append(PReLU())
         self.module_list.append(Flatten())
         self.module_list.append(Weight_Scaling(in_channels))
@@ -84,7 +85,7 @@ class _ModulatedConv(Module):
         self.prelu = PReLU()
         #[Cout,Cin,k,k]
 
-    def forward(self, x, style_std):
+    def forward(self, x, style_std, noise):
         # x: [N,Cin,H,W]
         # style_std: [N,Cin]
         batch_size = x.size(0)
@@ -105,6 +106,7 @@ class _ModulatedConv(Module):
         padding_size = (self.weight.size(3)-1)//2
         x = F.conv2d(x, weight, groups=batch_size, padding=padding_size)
         x = x.view(batch_size, out_channels, H, W) + self.bias
+        x += noise
         x = self.prelu(x)
         return x
 
@@ -128,24 +130,27 @@ class ModulatedConvBlock(Module):
             self.name = 'FORMER'
             self.out = False
 
-    def forward(self, x, style_base):
+    def forward(self, x, style_base, t=None):
         #x: [N,C,H,W]
         #style_base: [N,STYLE_SIZE]
+        #t: for 'LATTER' block, residual connection!
         batch_size = x.size(0)
         style_std = self.style_affine(self.style_scaling(style_base))+1
         if self.up:
-            x = F.interpolate(x, scale_factor=2, mode='bilinear', align_corners=True)
+            x = F.interpolate(x, scale_factor=2, mode='bilinear', align_corners=False)
         img_size = x.size(2)
-        noise = make_noise_img(batch_size, img_size)
+        noise = make_noise_img((batch_size, 1, img_size, img_size))
         if self.use_gpu:
             with torch.cuda.device_of(x):
                 noise = noise.cuda()
         else:
             noise = noise.cpu()
-        x = self.modulated_conv(x, style_std)
-        x = x + self.noise_scalar*noise
+        x = self.modulated_conv(x, style_std, self.noise_scalar*noise)
         if self.out:
             x = x.contiguous()
+            if t is not None:
+                x += t
+                x /= ROOT_2
             out = self.out_conv(self.out_weight_scale(x))
             out = torch.clamp(out, min=0, max=1)
             return x, out
@@ -162,8 +167,9 @@ class Generator(Module):
         else:
             assert Exception('invalid argument in Network2.Generator')
         self.img_size = img_size
-        self.basic_texture = torch.nn.Parameter(torch.ones(gen_channel, texture_size, texture_size))
+        self.basic_texture = torch.nn.Parameter(torch.normal(torch.zeros(gen_channel, texture_size, texture_size), 1.0))
         self.module_list = ModuleList()
+        self.conv1x1_list = ModuleList()
         first_block = ModulatedConvBlock(gen_channel, gen_channel, 3, style_size, use_gpu, up=False, out=True)
         self.module_list.append(first_block)
         in_size = 2*texture_size
@@ -174,12 +180,15 @@ class Generator(Module):
             former = ModulatedConvBlock(in_channels, in_channels, 3, style_size, use_gpu, up=True, out=False)
             if cnt > 1:
                 latter = ModulatedConvBlock(in_channels, in_channels//2, 3, style_size, use_gpu, up=False, out=True)
+                conv1x1 = Conv2d(in_channels, in_channels//2, 1)
                 out_channels = in_channels//2
             else:
                 latter = ModulatedConvBlock(in_channels, in_channels, 3, style_size, use_gpu, up=False, out=True)
+                conv1x1 = Conv2d(in_channels, in_channels, 1)
                 out_channels = in_channels
             self.module_list.append(former)
             self.module_list.append(latter)
+            self.conv1x1_list.append(conv1x1)
             if cnt == gen_nonlocal_loc:
                 print('gen: non_local block inserted, in_size: ', 2*in_size)
                 self.module_list.append(Non_Local(out_channels))
@@ -196,12 +205,19 @@ class Generator(Module):
         cnt = 0
         batch_size = style_base.size(0)
         x = self.basic_texture.repeat(batch_size, 1, 1, 1)
+        t = None
+        # t is for residual connection between 'FORMER' block and 'LATTER' block
         for m in self.module_list:
             if m.name == 'FORMER':
+                t = x
+                t = F.interpolate(t, scale_factor=2, mode='bilinear', align_corners=False)
+                t = self.conv1x1_list[cnt-1](t)
+                #for equalized learning rate
+                t /= self.conv1x1_list[cnt-1].weight.size(1)
                 x = m(x, style_base)
             elif m.name == 'LATTER':
                 cnt += 1
-                x, rgb = m(x, style_base)
+                x, rgb = m(x, style_base, t)
                 if img is None:
                     img = rgb
                 else:

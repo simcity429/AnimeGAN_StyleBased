@@ -14,14 +14,12 @@ ln2 = 0.69314
 
 def init_weights(m):
     if type(m) == Linear or type(m) == Conv2d:
-        torch.nn.init.normal_(m.weight)
+        #torch.nn.init.normal_(m.weight)
+        torch.nn.init.orthogonal_(m.weight)
         m.bias.data.fill_(0)
 
-def make_noise_img(batch_size, size):
-    noise = np.random.normal(loc=0.5, scale=0.3, size=size)
-    noise = np.where(noise > 1, 1, noise)
-    noise = np.where(noise < 0, 0, noise)
-    noise = np.tile(noise, (batch_size, 1, 1, 1))
+def make_noise_img(size):
+    noise = np.random.normal(loc=0, scale=1.0, size=size)
     return torch.as_tensor(noise, dtype=torch.float32)
 
 def AdaIN(content, style):
@@ -44,6 +42,7 @@ class Weight_Scaling(Module):
         self.kaiming_const = float(ROOT_2/np.sqrt(fan_in))
 
     def forward(self, x):
+        #return x
         return self.kaiming_const*x
 
 class Disc_Conv(Module):
@@ -104,6 +103,7 @@ class Non_Local(Module):
 
     def forward(self, x):
         batch_size, c, h, w = x.size()
+        t = x
         x = x.contiguous()
         x = self.weight_scaling_1(x)
         q = self.q_conv1x1(x).view(batch_size, -1, h*w)
@@ -115,7 +115,7 @@ class Non_Local(Module):
         sa_map = self.weight_scaling_2(sa_map)
         sa_map = sa_map.contiguous()
         sa_map = self.sa_conv1x1(sa_map.view(batch_size, -1, h, w))
-        return self.gamma*sa_map + x
+        return self.gamma*sa_map + t
 
 
 class Discriminator(Module):
@@ -184,7 +184,7 @@ class Generator_Conv(Module):
         batch_size = content.size(0)
         H = content.size(2)
         W = content.size(3)
-        noise = make_noise_img(batch_size, (2*H, 2*W))
+        noise = make_noise_img((batch_size, 1, 2*H, 2*W))
         if self.use_gpu:
             with torch.cuda.device_of(content):
                 noise = noise.cuda()
@@ -216,18 +216,6 @@ class StyleMapper(Module):
             PReLU(),
             Weight_Scaling(style_size//2),
             spectral_norm(Linear(style_size//2, style_size)),
-            PReLU(),
-            Weight_Scaling(style_size),
-            spectral_norm(Linear(style_size, style_size)),
-            PReLU(),
-            Weight_Scaling(style_size),
-            spectral_norm(Linear(style_size, style_size)),
-            PReLU(),
-            Weight_Scaling(style_size),
-            spectral_norm(Linear(style_size, style_size)),
-            PReLU(),
-            Weight_Scaling(style_size),
-            spectral_norm(Linear(style_size, style_size)),
             PReLU(),
             Weight_Scaling(style_size),
             spectral_norm(Linear(style_size, style_size)),
@@ -284,7 +272,7 @@ class Generator(Module):
     def forward(self, style_base):
         batch_size = style_base.size()[0]
         x = self.basic_texture.repeat(batch_size, 1, 1, 1)
-        noise = make_noise_img(batch_size, 4)
+        noise = make_noise_img((batch_size, 1, 4, 4))
         if self.use_gpu:
             with torch.cuda.device_of(style_base):
                 noise = noise.cuda()

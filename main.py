@@ -19,7 +19,7 @@ ln2 = 0.69314
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-def averaging_param(old_params:list, current_params:list, tau:float=0.9):
+def averaging_param(old_params:list, current_params:list, tau:float=0.99):
     for old_param, current_param in zip(old_params, current_params):
         current_param.data = (current_param.data * (1.0 - tau) + old_param.data * tau).clone()
 
@@ -112,7 +112,7 @@ if __name__ == '__main__':
         raise Exception('invalid argument in device (main)')
 
     #basic transformation for our dataset
-    basic_transform = T.Compose([T.RandomHorizontalFlip(), T.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2)])
+    basic_transform = T.Compose([T.RandomHorizontalFlip(), T.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1)])
     dataset = TANOCIv2_Dataset(img_size=img_size, dataset_path=dataset_path, transform=basic_transform)
     dataloader = DataLoader(dataset=dataset, batch_size=batch_size, shuffle=True, num_workers=8)
 
@@ -152,6 +152,7 @@ if __name__ == '__main__':
     #baseline
     if not lir:
         dist = MultivariateNormal(loc=torch.zeros(batch_size, z_size), covariance_matrix=z_cov*torch.eye(z_size))
+        visual_seed = torch.FloatTensor(dist.sample()).to(device)
     else:
         epsilon_dist = MultivariateNormal(loc=torch.zeros(batch_size, z_size), covariance_matrix=torch.eye(z_size))
     previous_grads_norm = 0
@@ -219,6 +220,7 @@ if __name__ == '__main__':
             if step_cnt % gen_lazy == 0 and version == 2:
                 #path length Regulation
                 y = torch.randn(real_batch_size, 3*img_size*img_size).to(device)
+                y /= img_size
                 w = S(z)
                 Gw = G(w).view(real_batch_size, -1)
                 Jy = torch.bmm(Gw.view(real_batch_size, 1, -1), y.view(real_batch_size, -1, 1))
