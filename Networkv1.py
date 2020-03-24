@@ -14,8 +14,8 @@ ln2 = 0.69314
 
 def init_weights(m):
     if type(m) == Linear or type(m) == Conv2d:
-        #torch.nn.init.normal_(m.weight)
-        torch.nn.init.orthogonal_(m.weight)
+        torch.nn.init.normal_(m.weight)
+        #torch.nn.init.orthogonal_(m.weight)
         m.bias.data.fill_(0)
 
 def make_noise_img(size):
@@ -59,7 +59,6 @@ class Disc_Conv(Module):
         self.avgpool2d = AvgPool2d(kernel_size=2, stride=2)
 
     def forward(self, x):
-        #for equalized learning rate
         x = self.weight_scaling_1(x)
         x = self.conv_1(x)
         x = self.prelu_1(x)
@@ -192,12 +191,10 @@ class Generator_Conv(Module):
             noise = noise.cpu()
         content = self.upsample_layer(content)
         content = self.weight_scaling_1(content)
-        content = self.prelu_1(self.conv_1(content))
-        content = content + self.noise_scaler_1*noise
+        content = self.prelu_1(self.conv_1(content) + self.noise_scaler_1*noise)
         content = AdaIN(content, self.style_affine_1(self.style_scaling(style_base)).view(-1, 2*self.out_channels, 1, 1))
         content = self.weight_scaling_2(content)
-        content = self.prelu_2(self.conv_2(content))
-        content = content + self.noise_scaler_2*noise
+        content = self.prelu_2(self.conv_2(content) + self.noise_scaler_2*noise)
         content = AdaIN(content, self.style_affine_2(self.style_scaling(style_base)).view(-1, 2*self.out_channels, 1, 1))
         return content
 
@@ -280,8 +277,7 @@ class Generator(Module):
             noise = noise.cpu()
         x = x + self.noise_scaler_1*noise
         x = AdaIN(x, self.style_affine_1(self.style_scaling(style_base)).view(-1, 2*self.gen_channel, 1, 1))
-        x = self.prelu(self.conv(self.weight_scaling_1(x)))
-        x = x + self.noise_scaler_2*noise
+        x = self.prelu(self.conv(self.weight_scaling_1(x)) + self.noise_scaler_2*noise)
         x = AdaIN(x, self.style_affine_2(self.style_scaling(style_base)).view(-1, 2*self.gen_channel, 1, 1))
         for m in self.module_list:
             if type(m) != Non_Local:
