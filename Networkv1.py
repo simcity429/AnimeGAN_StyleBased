@@ -126,7 +126,7 @@ class Discriminator(Module):
         self.module_list = ModuleList()
         in_channels = 3
         out_channels = disc_first_channel
-        self.module_list.append(Weight_Scaling(in_channels*1*1), LEAKY_RELU_GAIN)
+        self.module_list.append(Weight_Scaling(in_channels*1*1, LEAKY_RELU_GAIN))
         self.module_list.append(Conv2d(in_channels=in_channels, out_channels=disc_first_channel, kernel_size=1, stride=1))
         self.module_list.append(LeakyReLU(0.2))
         in_size = img_size
@@ -143,14 +143,14 @@ class Discriminator(Module):
                 self.module_list.append(Non_Local(out_channels))
             in_size //= 2
         self.module_list.append(Minibatch_Stddev())
-        self.module_list.append(Weight_Scaling((in_channels+1)*3*3), LEAKY_RELU_GAIN)
+        self.module_list.append(Weight_Scaling((in_channels+1)*3*3, LEAKY_RELU_GAIN))
         self.module_list.append(Conv2d(in_channels=in_channels+1, out_channels=in_channels, kernel_size=3, stride=1, padding=1))
         self.module_list.append(LeakyReLU(0.2))
-        self.module_list.append(Weight_Scaling(in_channels*4*4), LEAKY_RELU_GAIN)
+        self.module_list.append(Weight_Scaling(in_channels*4*4, LEAKY_RELU_GAIN))
         self.module_list.append(Conv2d(in_channels=in_channels, out_channels=in_channels, kernel_size=4, stride=1, padding=0))
         self.module_list.append(LeakyReLU(0.2))
         self.module_list.append(Flatten())
-        self.module_list.append(Weight_Scaling(in_channels), 1)
+        self.module_list.append(Weight_Scaling(in_channels, 1))
         self.module_list.append(Linear(in_channels, 1))
         self.to(device)
         self.opt = Adam(self.parameters(), lr=disc_lr, betas=BETAS)
