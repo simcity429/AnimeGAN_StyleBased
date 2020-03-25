@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torch.nn import Linear, Conv2d, UpsamplingBilinear2d, AvgPool2d, PReLU, Flatten, LayerNorm
+from torch.nn import Linear, Conv2d, UpsamplingBilinear2d, AvgPool2d, LeakyReLU, Flatten, LayerNorm
 from torch.nn import Module, ModuleList, Sequential
 from torch.optim import Adam
 from Networkv1 import make_noise_img, Weight_Scaling, Disc_Conv, StyleMapper, Non_Local, Minibatch_Stddev
@@ -9,6 +9,7 @@ from Networkv1 import make_noise_img, Weight_Scaling, Disc_Conv, StyleMapper, No
 BETAS = (0, 0.99)
 
 #constant
+LEAKY_RELU_GAIN = np.sqrt(2/(1+0.2**2))
 ROOT_2 = 1.41421
 ln2 = 0.69314
 
@@ -22,7 +23,7 @@ class ResidualBlock(Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
         self.disc_block = Disc_Conv(in_channels, out_channels)
-        self.weight_scaling = Weight_Scaling(in_channels*3*3)
+        self.weight_scaling = Weight_Scaling(in_channels*3*3, 1)
         self.conv = Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=1, stride=1)
 
     def forward(self, x):
@@ -42,8 +43,9 @@ class Discriminator(Module):
         in_channels = 3
         out_channels = disc_first_channel
         #fromRGB
-        self.module_list.append(Weight_Scaling(in_channels*1*1))
+        self.module_list.append(Weight_Scaling(in_channels*1*1, LEAKY_RELU_GAIN))
         self.module_list.append(Conv2d(in_channels=in_channels, out_channels=disc_first_channel, kernel_size=1, stride=1))
+        self.module_list.append(LeakyReLU(0.2))
         in_size = img_size
         cnt = 0
         while True:
@@ -58,11 +60,11 @@ class Discriminator(Module):
                 self.module_list.append(Non_Local(out_channels))
             in_size //= 2
         self.module_list.append(Minibatch_Stddev())
-        self.module_list.append(Weight_Scaling((in_channels+1)*4*4))
+        self.module_list.append(Weight_Scaling((in_channels+1)*4*4, LEAKY_RELU_GAIN))
         self.module_list.append(Conv2d(in_channels=in_channels+1, out_channels=in_channels, kernel_size=4, stride=1, padding=0))
-        self.module_list.append(PReLU())
+        self.module_list.append(LeakyReLU(0.2))
         self.module_list.append(Flatten())
-        self.module_list.append(Weight_Scaling(in_channels))
+        self.module_list.append(Weight_Scaling(in_channels, 1))
         self.module_list.append(Linear(in_channels, 1))
         self.to(device)
         self.opt = Adam(self.parameters(), lr=disc_lr, betas=BETAS)
@@ -81,7 +83,7 @@ class _ModulatedConv(Module):
         super().__init__()
         self.weight = torch.nn.Parameter(torch.randn(out_channels, in_channels, kernel_size, kernel_size))
         self.bias = torch.nn.Parameter(torch.zeros(1, out_channels, 1, 1))
-        self.prelu = PReLU()
+        self.LeakyReLU = LeakyReLU(0.2)
         #[Cout,Cin,k,k]
 
     def forward(self, x, style_std, noise):
@@ -106,7 +108,7 @@ class _ModulatedConv(Module):
         x = F.conv2d(x, weight, groups=batch_size, padding=padding_size)
         x = x.view(batch_size, out_channels, H, W) + self.bias
         x += noise
-        x = self.prelu(x)
+        x = self.LeakyReLU(x)
         return x
 
 class ModulatedConvBlock(Module):
@@ -116,14 +118,14 @@ class ModulatedConvBlock(Module):
         super().__init__()
         self.use_gpu = use_gpu
         self.up = up
-        self.style_scaling = Weight_Scaling(style_size)
+        self.style_scaling = Weight_Scaling(style_size, 1)
         self.style_affine = Linear(style_size, in_channels)
         self.modulated_conv = _ModulatedConv(in_channels, out_channels, kernel_size)
         self.noise_scalar = torch.nn.Parameter(torch.zeros(out_channels).view(1, out_channels, 1, 1))
         if out:
             self.name = 'LATTER'
             self.out = True
-            self.out_weight_scale = Weight_Scaling(out_channels*1*1)
+            self.out_weight_scale = Weight_Scaling(out_channels*1*1, 1)
             self.out_conv = Conv2d(out_channels, 3, 1)
         else:
             self.name = 'FORMER'
@@ -212,7 +214,8 @@ class Generator(Module):
                 t = F.interpolate(t, scale_factor=2, mode='bilinear', align_corners=False)
                 t = self.conv1x1_list[cnt-1](t)
                 #for equalized learning rate
-                t /= self.conv1x1_list[cnt-1].weight.size(1)
+                #gain = 1
+                t /= float(np.sqrt(self.conv1x1_list[cnt-1].weight.size(1)))
                 x = m(x, style_base)
             elif m.name == 'LATTER':
                 cnt += 1

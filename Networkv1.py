@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torch.nn import Linear, Conv2d, UpsamplingBilinear2d, AvgPool2d, PReLU, Flatten, LayerNorm
+from torch.nn import Linear, Conv2d, UpsamplingBilinear2d, AvgPool2d, LeakyReLU, Flatten, LayerNorm
 from torch.nn import Module, ModuleList, Sequential
 from torch.nn.utils import spectral_norm
 from torch.optim import Adam
@@ -9,6 +9,7 @@ from torch.optim import Adam
 BETAS = (0, 0.99)
 
 #constant
+LEAKY_RELU_GAIN = np.sqrt(2/(1+0.2**2))
 ROOT_2 = 1.41421
 ln2 = 0.69314
 
@@ -37,9 +38,9 @@ def AdaIN(content, style):
     
 
 class Weight_Scaling(Module):
-    def __init__(self, fan_in):
+    def __init__(self, fan_in, gain):
         super().__init__()
-        self.kaiming_const = float(ROOT_2/np.sqrt(fan_in))
+        self.kaiming_const = float(gain/np.sqrt(fan_in))
 
     def forward(self, x):
         #return x
@@ -50,21 +51,21 @@ class Disc_Conv(Module):
         super().__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
-        self.weight_scaling_1 = Weight_Scaling(in_channels*3*3)
+        self.weight_scaling_1 = Weight_Scaling(in_channels*3*3, LEAKY_RELU_GAIN)
         self.conv_1 = Conv2d(in_channels=in_channels, out_channels=in_channels, kernel_size=3, stride=1, padding=1)
-        self.prelu_1 = PReLU()
-        self.weight_scaling_2 = Weight_Scaling(in_channels*3*3)
+        self.LeakyReLU_1 = LeakyReLU(0.2)
+        self.weight_scaling_2 = Weight_Scaling(in_channels*3*3, LEAKY_RELU_GAIN)
         self.conv_2 = Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=3, stride=1, padding=1)
-        self.prelu_2 = PReLU()
+        self.LeakyReLU_2 = LeakyReLU(0.2)
         self.avgpool2d = AvgPool2d(kernel_size=2, stride=2)
 
     def forward(self, x):
         x = self.weight_scaling_1(x)
         x = self.conv_1(x)
-        x = self.prelu_1(x)
+        x = self.LeakyReLU_1(x)
         x = self.weight_scaling_2(x)
         x = self.conv_2(x)
-        x = self.prelu_2(x)
+        x = self.LeakyReLU_2(x)
         x = self.avgpool2d(x)
         return x
 
@@ -92,11 +93,11 @@ class Non_Local(Module):
         super().__init__()
         assert in_channels % div_num == 0, "The remainder of 'in_ch/div_num' must be zero."
         self.name = 'NON_LOCAL'
-        self.weight_scaling_1 = Weight_Scaling(in_channels*1*1)
+        self.weight_scaling_1 = Weight_Scaling(in_channels*1*1, 1)
         self.q_conv1x1 = spectral_norm(Conv2d(in_channels, in_channels//div_num, kernel_size=1))
         self.k_conv1x1 = spectral_norm(Conv2d(in_channels, in_channels//div_num, kernel_size=1))
         self.v_conv1x1 = spectral_norm(Conv2d(in_channels, in_channels//div_num, kernel_size=1))
-        self.weight_scaling_2 = Weight_Scaling((in_channels//div_num)*1*1)
+        self.weight_scaling_2 = Weight_Scaling((in_channels//div_num)*1*1, 1)
         self.sa_conv1x1 = spectral_norm(Conv2d(in_channels//div_num, in_channels, kernel_size=1))
         self.gamma = torch.nn.Parameter(torch.zeros(1))
 
@@ -125,9 +126,9 @@ class Discriminator(Module):
         self.module_list = ModuleList()
         in_channels = 3
         out_channels = disc_first_channel
-        self.module_list.append(Weight_Scaling(in_channels*1*1))
+        self.module_list.append(Weight_Scaling(in_channels*1*1), LEAKY_RELU_GAIN)
         self.module_list.append(Conv2d(in_channels=in_channels, out_channels=disc_first_channel, kernel_size=1, stride=1))
-        self.module_list.append(PReLU())
+        self.module_list.append(LeakyReLU(0.2))
         in_size = img_size
         cnt = 0
         while True:
@@ -142,14 +143,14 @@ class Discriminator(Module):
                 self.module_list.append(Non_Local(out_channels))
             in_size //= 2
         self.module_list.append(Minibatch_Stddev())
-        self.module_list.append(Weight_Scaling((in_channels+1)*3*3))
+        self.module_list.append(Weight_Scaling((in_channels+1)*3*3), LEAKY_RELU_GAIN)
         self.module_list.append(Conv2d(in_channels=in_channels+1, out_channels=in_channels, kernel_size=3, stride=1, padding=1))
-        self.module_list.append(PReLU())
-        self.module_list.append(Weight_Scaling(in_channels*4*4))
+        self.module_list.append(LeakyReLU(0.2))
+        self.module_list.append(Weight_Scaling(in_channels*4*4), LEAKY_RELU_GAIN)
         self.module_list.append(Conv2d(in_channels=in_channels, out_channels=in_channels, kernel_size=4, stride=1, padding=0))
-        self.module_list.append(PReLU())
+        self.module_list.append(LeakyReLU(0.2))
         self.module_list.append(Flatten())
-        self.module_list.append(Weight_Scaling(in_channels))
+        self.module_list.append(Weight_Scaling(in_channels), 1)
         self.module_list.append(Linear(in_channels, 1))
         self.to(device)
         self.opt = Adam(self.parameters(), lr=disc_lr, betas=BETAS)
@@ -167,13 +168,13 @@ class Generator_Conv(Module):
         self.use_gpu = use_gpu
         self.upsample_layer = UpsamplingBilinear2d(scale_factor=2)
         self.out_channels = out_channels
-        self.weight_scaling_1 = Weight_Scaling(in_channels*kernel_size*kernel_size)
+        self.weight_scaling_1 = Weight_Scaling(in_channels*kernel_size*kernel_size, LEAKY_RELU_GAIN)
         self.conv_1 = spectral_norm(Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, stride=1, padding=1))
-        self.prelu_1 = PReLU()
-        self.weight_scaling_2 = Weight_Scaling(out_channels*kernel_size*kernel_size)
+        self.LeakyReLU_1 = LeakyReLU(0.2)
+        self.weight_scaling_2 = Weight_Scaling(out_channels*kernel_size*kernel_size, LEAKY_RELU_GAIN)
         self.conv_2 = spectral_norm(Conv2d(in_channels=out_channels, out_channels=out_channels, kernel_size=kernel_size, stride=1, padding=1))
-        self.prelu_2 = PReLU()
-        self.style_scaling = Weight_Scaling(style_size)
+        self.LeakyReLU_2 = LeakyReLU(0.2)
+        self.style_scaling = Weight_Scaling(style_size, 1)
         self.style_affine_1 = Linear(style_size, in_channels)
         self.noise_scaler_1 = torch.nn.Parameter(torch.zeros(out_channels).view(1, out_channels, 1, 1))
         self.style_affine_2 = Linear(style_size, in_channels)
@@ -191,10 +192,10 @@ class Generator_Conv(Module):
             noise = noise.cpu()
         content = self.upsample_layer(content)
         content = self.weight_scaling_1(content)
-        content = self.prelu_1(self.conv_1(content) + self.noise_scaler_1*noise)
+        content = self.LeakyReLU_1(self.conv_1(content) + self.noise_scaler_1*noise)
         content = AdaIN(content, self.style_affine_1(self.style_scaling(style_base)).view(-1, 2*self.out_channels, 1, 1))
         content = self.weight_scaling_2(content)
-        content = self.prelu_2(self.conv_2(content) + self.noise_scaler_2*noise)
+        content = self.LeakyReLU_2(self.conv_2(content) + self.noise_scaler_2*noise)
         content = AdaIN(content, self.style_affine_2(self.style_scaling(style_base)).view(-1, 2*self.out_channels, 1, 1))
         return content
 
@@ -205,28 +206,28 @@ class StyleMapper(Module):
         if not(device == 'cpu' or 'cuda:' in device):
             assert Exception('invalid argument in Network1.StyleMapper')
         self.styleblock = Sequential(
-            Weight_Scaling(z_size),
+            Weight_Scaling(z_size, LEAKY_RELU_GAIN),
             Linear(z_size, style_size//8),
-            PReLU(),
-            Weight_Scaling(style_size//8),
+            LeakyReLU(),
+            Weight_Scaling(style_size//8, LEAKY_RELU_GAIN),
             Linear(style_size//8, style_size//4),
-            PReLU(),
-            Weight_Scaling(style_size//4),
+            LeakyReLU(0.2),
+            Weight_Scaling(style_size//4, LEAKY_RELU_GAIN),
             Linear(style_size//4, style_size//2),
-            PReLU(),
-            Weight_Scaling(style_size//2),
+            LeakyReLU(0.2),
+            Weight_Scaling(style_size//2, LEAKY_RELU_GAIN),
             Linear(style_size//2, style_size),
-            PReLU(),
-            Weight_Scaling(style_size),
+            LeakyReLU(0.2),
+            Weight_Scaling(style_size, LEAKY_RELU_GAIN),
             Linear(style_size, style_size),
-            PReLU(),
-            Weight_Scaling(style_size),
+            LeakyReLU(0.2),
+            Weight_Scaling(style_size, LEAKY_RELU_GAIN),
             Linear(style_size, style_size),
-            PReLU(),
-            Weight_Scaling(style_size),
+            LeakyReLU(0.2),
+            Weight_Scaling(style_size, LEAKY_RELU_GAIN),
             Linear(style_size, style_size),
-            PReLU(),
-            Weight_Scaling(style_size),
+            LeakyReLU(0.2),
+            Weight_Scaling(style_size, LEAKY_RELU_GAIN),
             Linear(style_size, style_size),
         )
         self.to(device)
@@ -249,10 +250,10 @@ class Generator(Module):
             assert Exception('invalid argument in Network2.Generator')
         self.gen_channel = gen_channel
         self.basic_texture = torch.nn.Parameter(torch.rand(gen_channel, texture_size, texture_size))
-        self.weight_scaling_1 = Weight_Scaling(gen_channel*3*3)
+        self.weight_scaling_1 = Weight_Scaling(gen_channel*3*3, LEAKY_RELU_GAIN)
         self.conv = spectral_norm(Conv2d(in_channels=gen_channel, out_channels=gen_channel, kernel_size=3, stride=1, padding=1))
-        self.prelu = PReLU()
-        self.style_scaling = Weight_Scaling(style_size)
+        self.LeakyReLU = LeakyReLU(0.2)
+        self.style_scaling = Weight_Scaling(style_size, 1)
         self.style_affine_1 = Linear(style_size, gen_channel*2)
         self.noise_scaler_1 = torch.nn.Parameter(torch.zeros(gen_channel).view(1, gen_channel, 1, 1))
         self.style_affine_2 = Linear(style_size, gen_channel*2)
@@ -271,7 +272,7 @@ class Generator(Module):
             in_size *= 2
             if in_size >= img_size:
                 break
-        self.weight_scaling_2 = Weight_Scaling(in_channels*1*1)
+        self.weight_scaling_2 = Weight_Scaling(in_channels*1*1, 1)
         self.last_layer = spectral_norm(Conv2d(in_channels=in_channels, out_channels=3, kernel_size=1, stride=1))
         self.to(device)
         self.opt = Adam(self.parameters(), lr=gen_lr, betas=BETAS)
@@ -289,7 +290,7 @@ class Generator(Module):
             noise = noise.cpu()
         x = x + self.noise_scaler_1*noise
         x = AdaIN(x, self.style_affine_1(self.style_scaling(style_base)).view(-1, 2*self.gen_channel, 1, 1))
-        x = self.prelu(self.conv(self.weight_scaling_1(x)) + self.noise_scaler_2*noise)
+        x = self.LeakyReLU(self.conv(self.weight_scaling_1(x)) + self.noise_scaler_2*noise)
         x = AdaIN(x, self.style_affine_2(self.style_scaling(style_base)).view(-1, 2*self.gen_channel, 1, 1))
         for m in self.module_list:
             if type(m) != Non_Local:
