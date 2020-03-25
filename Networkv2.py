@@ -3,7 +3,6 @@ import torch
 import torch.nn.functional as F
 from torch.nn import Linear, Conv2d, UpsamplingBilinear2d, AvgPool2d, PReLU, Flatten, LayerNorm
 from torch.nn import Module, ModuleList, Sequential
-from torch.nn.utils import spectral_norm
 from torch.optim import Adam
 from Networkv1 import make_noise_img, Weight_Scaling, Disc_Conv, StyleMapper, Non_Local, Minibatch_Stddev
 

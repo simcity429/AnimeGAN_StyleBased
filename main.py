@@ -19,7 +19,7 @@ ln2 = 0.69314
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-def averaging_param(old_params:list, current_params:list, tau:float=0.99):
+def averaging_param(old_params:list, current_params:list, tau:float=0.999):
     for old_param, current_param in zip(old_params, current_params):
         current_param.data = (current_param.data * (1.0 - tau) + old_param.data * tau).clone()
 
@@ -44,7 +44,7 @@ if __name__ == '__main__':
     parser.add_argument('--ema_start', default=50000)
 
     #generator arguments
-    parser.add_argument('--style_size', default=64)
+    parser.add_argument('--style_size', default=128)
     parser.add_argument('--z_size', default=8)
     parser.add_argument('--texture_size', default=4)
     parser.add_argument('--gen_channel', default=256)
@@ -177,6 +177,14 @@ if __name__ == '__main__':
                 z = torch.FloatTensor(v).to(device)[:real_batch_size]
             print('------------!--------------!------------')
             #d_update
+            '''
+            if torch.cuda.device_count() > 1 and use_multi_gpu:
+                if step_cnt > ema_start:
+                    D_old_params = [p.clone().detach() for p in D.module.parameters()]
+            else:
+                if step_cnt > ema_start:
+                    D_old_params = [p.clone().detach() for p in D.parameters()]
+            '''
             G_fake = G(S(z))
             fake = G_fake.detach()
             real_out = D(real)
@@ -203,8 +211,20 @@ if __name__ == '__main__':
             d_loss.backward()
             if torch.cuda.device_count() > 1 and use_multi_gpu:
                 D.module.opt.step()
+                '''
+                if step_cnt > ema_start:
+                    print('step ', step_cnt, 'D averaging param applied...')
+                    D_current_params = [p for p in D.module.parameters()]
+                    averaging_param(D_old_params, D_current_params)
+                '''
             else:
                 D.opt.step()
+                '''
+                if step_cnt > ema_start:
+                    print('step ', step_cnt, 'D averaging param applied...')
+                    D_current_params = [p for p in D.parameters()]
+                    averaging_param(D_old_params, D_current_params)
+                '''
             #g_update
             if torch.cuda.device_count() > 1 and use_multi_gpu:
                 if step_cnt > ema_start:
@@ -247,6 +267,7 @@ if __name__ == '__main__':
                 S.module.opt.step()
                 G.module.opt.step()
                 if step_cnt > ema_start:
+                    print('step ', step_cnt, 'SG averaging param applied...')
                     S_current_params = [p for p in S.module.parameters()]
                     G_current_params = [p for p in G.module.parameters()]
                     averaging_param(S_old_params, S_current_params)
@@ -255,7 +276,7 @@ if __name__ == '__main__':
                 S.opt.step()
                 G.opt.step()
                 if step_cnt > ema_start:
-                    print('step ', step_cnt, 'averaging param applied...')
+                    print('step ', step_cnt, 'SG averaging param applied...')
                     S_current_params = [p for p in S.parameters()]
                     G_current_params = [p for p in G.parameters()]
                     averaging_param(S_old_params, S_current_params)
