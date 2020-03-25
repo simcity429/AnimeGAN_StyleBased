@@ -3,6 +3,7 @@ import torch
 import torch.nn.functional as F
 from torch.nn import Linear, Conv2d, UpsamplingBilinear2d, AvgPool2d, PReLU, Flatten, LayerNorm
 from torch.nn import Module, ModuleList, Sequential
+from torch.nn.utils import spectral_norm
 from torch.optim import Adam
 
 BETAS = (0, 0.99)
@@ -92,11 +93,11 @@ class Non_Local(Module):
         assert in_channels % div_num == 0, "The remainder of 'in_ch/div_num' must be zero."
         self.name = 'NON_LOCAL'
         self.weight_scaling_1 = Weight_Scaling(in_channels*1*1)
-        self.q_conv1x1 = Conv2d(in_channels, in_channels//div_num, kernel_size=1)
-        self.k_conv1x1 = Conv2d(in_channels, in_channels//div_num, kernel_size=1)
-        self.v_conv1x1 = Conv2d(in_channels, in_channels//div_num, kernel_size=1)
+        self.q_conv1x1 = spectral_norm(Conv2d(in_channels, in_channels//div_num, kernel_size=1))
+        self.k_conv1x1 = spectral_norm(Conv2d(in_channels, in_channels//div_num, kernel_size=1))
+        self.v_conv1x1 = spectral_norm(Conv2d(in_channels, in_channels//div_num, kernel_size=1))
         self.weight_scaling_2 = Weight_Scaling((in_channels//div_num)*1*1)
-        self.sa_conv1x1 = Conv2d(in_channels//div_num, in_channels, kernel_size=1)
+        self.sa_conv1x1 = spectral_norm(Conv2d(in_channels//div_num, in_channels, kernel_size=1))
         self.gamma = torch.nn.Parameter(torch.zeros(1))
 
     def forward(self, x):
@@ -167,10 +168,10 @@ class Generator_Conv(Module):
         self.upsample_layer = UpsamplingBilinear2d(scale_factor=2)
         self.out_channels = out_channels
         self.weight_scaling_1 = Weight_Scaling(in_channels*kernel_size*kernel_size)
-        self.conv_1 = Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, stride=1, padding=1)
+        self.conv_1 = spectral_norm(Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, stride=1, padding=1))
         self.prelu_1 = PReLU()
         self.weight_scaling_2 = Weight_Scaling(out_channels*kernel_size*kernel_size)
-        self.conv_2 = Conv2d(in_channels=out_channels, out_channels=out_channels, kernel_size=kernel_size, stride=1, padding=1)
+        self.conv_2 = spectral_norm(Conv2d(in_channels=out_channels, out_channels=out_channels, kernel_size=kernel_size, stride=1, padding=1))
         self.prelu_2 = PReLU()
         self.style_scaling = Weight_Scaling(style_size)
         self.style_affine_1 = Linear(style_size, in_channels)
@@ -249,7 +250,7 @@ class Generator(Module):
         self.gen_channel = gen_channel
         self.basic_texture = torch.nn.Parameter(torch.rand(gen_channel, texture_size, texture_size))
         self.weight_scaling_1 = Weight_Scaling(gen_channel*3*3)
-        self.conv = Conv2d(in_channels=gen_channel, out_channels=gen_channel, kernel_size=3, stride=1, padding=1)
+        self.conv = spectral_norm(Conv2d(in_channels=gen_channel, out_channels=gen_channel, kernel_size=3, stride=1, padding=1))
         self.prelu = PReLU()
         self.style_scaling = Weight_Scaling(style_size)
         self.style_affine_1 = Linear(style_size, gen_channel*2)
@@ -271,7 +272,7 @@ class Generator(Module):
             if in_size >= img_size:
                 break
         self.weight_scaling_2 = Weight_Scaling(in_channels*1*1)
-        self.last_layer = Conv2d(in_channels=in_channels, out_channels=3, kernel_size=1, stride=1)
+        self.last_layer = spectral_norm(Conv2d(in_channels=in_channels, out_channels=3, kernel_size=1, stride=1))
         self.to(device)
         self.opt = Adam(self.parameters(), lr=gen_lr, betas=BETAS)
         self.apply(init_weights)
