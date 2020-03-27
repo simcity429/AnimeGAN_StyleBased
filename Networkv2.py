@@ -3,6 +3,7 @@ import torch
 import torch.nn.functional as F
 from torch.nn import Linear, Conv2d, UpsamplingBilinear2d, AvgPool2d, LeakyReLU, Flatten, LayerNorm
 from torch.nn import Module, ModuleList, Sequential
+from torch.nn.utils import spectral_norm
 from torch.optim import Adam
 from Networkv1 import make_noise_img, Weight_Scaling, Disc_Conv, StyleMapper, Non_Local, Minibatch_Stddev
 
@@ -81,6 +82,7 @@ class Discriminator(Module):
 class _ModulatedConv(Module):
     def __init__(self, in_channels, out_channels, kernel_size):
         super().__init__()
+        self.weight_scale = Weight_Scaling(in_channels*kernel_size*kernel_size, LEAKY_RELU_GAIN)
         self.weight = torch.nn.Parameter(torch.randn(out_channels, in_channels, kernel_size, kernel_size))
         self.bias = torch.nn.Parameter(torch.zeros(1, out_channels, 1, 1))
         self.LeakyReLU = LeakyReLU(0.2)
@@ -89,6 +91,8 @@ class _ModulatedConv(Module):
     def forward(self, x, style_std, noise):
         # x: [N,Cin,H,W]
         # style_std: [N,Cin]
+        #for equalized learning rate
+        #x = self.weight_scale(x)
         batch_size = x.size(0)
         in_channels = x.size(1)
         out_channels = self.weight.size(0)
@@ -114,7 +118,7 @@ class _ModulatedConv(Module):
 class ModulatedConvBlock(Module):
     def __init__(self, in_channels, out_channels, kernel_size, style_size, use_gpu, up, out):
         #up: upsamplex2?
-        #out: RGB out?
+        #out: RGB out?  
         super().__init__()
         self.use_gpu = use_gpu
         self.up = up
@@ -126,7 +130,7 @@ class ModulatedConvBlock(Module):
             self.name = 'LATTER'
             self.out = True
             self.out_weight_scale = Weight_Scaling(out_channels*1*1, 1)
-            self.out_conv = Conv2d(out_channels, 3, 1)
+            self.out_conv = spectral_norm(Conv2d(out_channels, 3, 1))
         else:
             self.name = 'FORMER'
             self.out = False
@@ -152,7 +156,7 @@ class ModulatedConvBlock(Module):
             if t is not None:
                 x += t
                 x /= ROOT_2
-            out = self.out_conv(self.out_weight_scale(x))
+            out = self.out_conv(x)
             out = torch.clamp(out, min=0, max=1)
             return x, out
         else:
@@ -227,7 +231,7 @@ class Generator(Module):
                 if x.size(2) == self.img_size:
                     #last layer doesn't need bilinear upsampling!
                     break
-                img = F.interpolate(img, scale_factor=2, mode='bilinear', align_corners=True)
+                img = F.interpolate(img, scale_factor=2, mode='bilinear', align_corners=False)
             elif m.name == 'NON_LOCAL':
                 x = m(x)
             else:

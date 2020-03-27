@@ -152,7 +152,7 @@ if __name__ == '__main__':
     #baseline
     if not lir:
         dist = MultivariateNormal(loc=torch.zeros(batch_size, z_size), covariance_matrix=z_cov*torch.eye(z_size))
-        visual_seed = torch.FloatTensor(dist.sample()).to(device)
+        #visual_seed = torch.FloatTensor(dist.sample()).to(device)
     else:
         epsilon_dist = MultivariateNormal(loc=torch.zeros(batch_size, z_size), covariance_matrix=torch.eye(z_size))
     previous_grads_norm = 0
