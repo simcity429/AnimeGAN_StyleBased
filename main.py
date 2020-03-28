@@ -285,8 +285,8 @@ if __name__ == '__main__':
                 img_save_path = save_path + '_img/'
                 index = str(step_cnt//verbose_freq)
                 vis_fake = G(S(visual_seed)).detach()
-                save_image(make_grid(vis_fake), img_save_path + index + '.jpg')
-                save_image(make_grid(vis_fake), args.lir + '.jpg')
+                save_image(make_grid(vis_fake), img_save_path + index + '.jpg', normalize=True)
+                save_image(make_grid(vis_fake), args.lir + '.jpg', normalize=True)
                 if int(index) % save_freq == 0:
                     weight_save_path = save_path + '_weight/'
                     torch.save(S.state_dict(), weight_save_path + index + 'S.pt')

@@ -3,7 +3,6 @@ import torch
 import torch.nn.functional as F
 from torch.nn import Linear, Conv2d, UpsamplingBilinear2d, AvgPool2d, LeakyReLU, Flatten, LayerNorm
 from torch.nn import Module, ModuleList, Sequential
-from torch.nn.utils import spectral_norm
 from torch.optim import Adam
 
 BETAS = (0, 0.99)
@@ -273,7 +272,7 @@ class Generator(Module):
             if in_size >= img_size:
                 break
         self.weight_scaling_2 = Weight_Scaling(in_channels*1*1, 1)
-        self.last_layer = spectral_norm(Conv2d(in_channels=in_channels, out_channels=3, kernel_size=1, stride=1))
+        self.last_layer = Conv2d(in_channels=in_channels, out_channels=3, kernel_size=1, stride=1)
         self.to(device)
         self.opt = Adam(self.parameters(), lr=gen_lr, betas=BETAS)
         self.apply(init_weights)
@@ -301,8 +300,7 @@ class Generator(Module):
         #fucking bug! pytorch1.4.0 has bug on conv with 1*1 kernel!
         x = x.contiguous()
         #above line fix the bug
-        x = self.last_layer(x)
-        x = torch.clamp(x, min=0, max=1)
+        x = F.tanh(self.last_layer(x))
         return x
 
 if __name__ == '__main__':

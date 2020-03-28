@@ -3,7 +3,6 @@ import torch
 import torch.nn.functional as F
 from torch.nn import Linear, Conv2d, UpsamplingBilinear2d, AvgPool2d, LeakyReLU, Flatten, LayerNorm
 from torch.nn import Module, ModuleList, Sequential
-from torch.nn.utils import spectral_norm
 from torch.optim import Adam
 from Networkv1 import make_noise_img, Weight_Scaling, Disc_Conv, StyleMapper, Non_Local, Minibatch_Stddev
 
@@ -130,7 +129,7 @@ class ModulatedConvBlock(Module):
             self.name = 'LATTER'
             self.out = True
             self.out_weight_scale = Weight_Scaling(out_channels*1*1, 1)
-            self.out_conv = spectral_norm(Conv2d(out_channels, 3, 1))
+            self.out_conv = Conv2d(out_channels, 3, 1)
         else:
             self.name = 'FORMER'
             self.out = False
@@ -156,8 +155,7 @@ class ModulatedConvBlock(Module):
             if t is not None:
                 x += t
                 x /= ROOT_2
-            out = self.out_conv(x)
-            out = torch.clamp(out, min=0, max=1)
+            out =F.tanh(self.out_conv(x))
             return x, out
         else:
             return x
@@ -236,7 +234,7 @@ class Generator(Module):
                 x = m(x)
             else:
                 raise NotImplementedError(m.name,'in generator, unknown block name')
-        img = torch.clamp(img, min=0, max=1)
+        img = torch.clamp(img, min=-1, max=1)
         return img
 
 

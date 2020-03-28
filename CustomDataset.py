@@ -34,11 +34,13 @@ class TANOCIv2_Dataset(Dataset):
             img = TF.resize(img, self.img_size)
             img = TF.center_crop(img, self.img_size)
             img = TF.to_tensor(img)
+            img = TF.normalize(img, [0.5,0.5,0.5], [0.5,0.5,0.5])
             return img
         else:
             img = TF.resize(img, self.img_size)
             img = self.transform(img)
             img = TF.center_crop(img, self.img_size)
             img = TF.to_tensor(img)
+            img = TF.normalize(img, [0.5,0.5,0.5], [0.5,0.5,0.5])
             return img
 
