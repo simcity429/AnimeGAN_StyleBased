@@ -155,7 +155,7 @@ class ModulatedConvBlock(Module):
             if t is not None:
                 x += t
                 x /= ROOT_2
-            out =F.tanh(self.out_conv(x))
+            out = F.tanh(self.out_conv(x))
             return x, out
         else:
             return x
@@ -234,7 +234,8 @@ class Generator(Module):
                 x = m(x)
             else:
                 raise NotImplementedError(m.name,'in generator, unknown block name')
-        img = torch.clamp(img, min=-1, max=1)
+        img /= cnt
+        img = F.tanh(img)
         return img
 
 

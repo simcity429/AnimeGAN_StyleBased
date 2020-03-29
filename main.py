@@ -20,9 +20,14 @@ def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 def averaging_param(old_params:list, current_params:list, tau:float=0.99):
+    #old_param should be averaging network
     for old_param, current_param in zip(old_params, current_params):
-        current_param.data = (current_param.data * (1.0 - tau) + old_param.data * tau).clone()
+        old_param.data = (current_param.data * (1.0 - tau) + old_param.data * tau).clone()
+    
 
+def cp_module(src:Module, dst:Module):
+    for src_param, dst_param in zip(src.parameters(), dst.parameters()):
+        dst_param.data = src_param.data.clone()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -120,9 +125,13 @@ if __name__ == '__main__':
     if version == 1:
         G = Networkv1.Generator(gen_channel, texture_size, style_size, gen_nonlocal_loc, gen_lr, img_size, device)
         D = Networkv1.Discriminator(disc_first_channel, disc_last_size, disc_nonlocal_loc, disc_lr, img_size, device)
+        G_average = Networkv1.Generator(gen_channel, texture_size, style_size, gen_nonlocal_loc, gen_lr, img_size, device)
+        cp_module(G, G_average)
     elif version == 2:
         G = Networkv2.Generator(gen_channel, texture_size, style_size, gen_nonlocal_loc, gen_lr, img_size, device)
         D = Networkv2.Discriminator(disc_first_channel, disc_last_size, disc_nonlocal_loc, disc_lr, img_size, device)
+        G_average = Networkv2.Generator(gen_channel, texture_size, style_size, gen_nonlocal_loc, gen_lr, img_size, device)
+        cp_module(G, G_average)
     else:
         raise Exception('invalid version')
 
@@ -177,14 +186,6 @@ if __name__ == '__main__':
                 z = torch.FloatTensor(v).to(device)[:real_batch_size]
             print('------------!--------------!------------')
             #d_update
-            '''
-            if torch.cuda.device_count() > 1 and use_multi_gpu:
-                if step_cnt > ema_start:
-                    D_old_params = [p.clone().detach() for p in D.module.parameters()]
-            else:
-                if step_cnt > ema_start:
-                    D_old_params = [p.clone().detach() for p in D.parameters()]
-            '''
             G_fake = G(S(z))
             fake = G_fake.detach()
             real_out = D(real)
@@ -211,29 +212,16 @@ if __name__ == '__main__':
             d_loss.backward()
             if torch.cuda.device_count() > 1 and use_multi_gpu:
                 D.module.opt.step()
-                '''
-                if step_cnt > ema_start:
-                    print('step ', step_cnt, 'D averaging param applied...')
-                    D_current_params = [p for p in D.module.parameters()]
-                    averaging_param(D_old_params, D_current_params)
-                '''
             else:
                 D.opt.step()
-                '''
-                if step_cnt > ema_start:
-                    print('step ', step_cnt, 'D averaging param applied...')
-                    D_current_params = [p for p in D.parameters()]
-                    averaging_param(D_old_params, D_current_params)
-                '''
             #g_update
-            if torch.cuda.device_count() > 1 and use_multi_gpu:
-                if step_cnt > ema_start:
-                    S_old_params = [p.clone().detach() for p in S.module.parameters()]
-                    G_old_parmas = [p.clone().detach() for p in G.module.parameters()]
-            else:
-                if step_cnt > ema_start:
-                    S_old_params = [p.clone().detach() for p in S.parameters()]
-                    G_old_parmas = [p.clone().detach() for p in G.parameters()]
+            if step_cnt <= ema_start:
+                if torch.cuda.device_count() > 1 and use_multi_gpu:
+                    cp_module(G.module, G_average)
+                else:
+                    cp_module(G, G_average)
+            elif step_cnt > ema_start:
+                G_old_parmas = [p.clone().detach() for p in G_average.parameters()]
             fake_out = D(G_fake)
             g_loss = -torch.mean(fake_out)
             print('epoch:', e, 'step: ', step_cnt, '!!!g_loss', g_loss)
@@ -268,23 +256,19 @@ if __name__ == '__main__':
                 G.module.opt.step()
                 if step_cnt > ema_start:
                     print('step ', step_cnt, 'SG averaging param applied...')
-                    S_current_params = [p for p in S.module.parameters()]
                     G_current_params = [p for p in G.module.parameters()]
-                    averaging_param(S_old_params, S_current_params)
                     averaging_param(G_old_parmas, G_current_params)
             else:
                 S.opt.step()
                 G.opt.step()
                 if step_cnt > ema_start:
                     print('step ', step_cnt, 'SG averaging param applied...')
-                    S_current_params = [p for p in S.parameters()]
                     G_current_params = [p for p in G.parameters()]
-                    averaging_param(S_old_params, S_current_params)
                     averaging_param(G_old_parmas, G_current_params)
             if step_cnt == 1 or step_cnt % verbose_freq == 0:
                 img_save_path = save_path + '_img/'
                 index = str(step_cnt//verbose_freq)
-                vis_fake = G(S(visual_seed)).detach()
+                vis_fake = G_average(S(visual_seed)).detach()
                 save_image(make_grid(vis_fake), img_save_path + index + '.jpg', normalize=True)
                 save_image(make_grid(vis_fake), args.lir + '.jpg', normalize=True)
                 if int(index) % save_freq == 0:
