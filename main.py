@@ -143,6 +143,7 @@ if __name__ == '__main__':
         S.load_state_dict(torch.load(S_load_path))
         G.load_state_dict(torch.load(G_load_path))
         D.load_state_dict(torch.load(D_load_path))
+        cp_module(G, G_average)
         print('loading complete!')
     if torch.cuda.device_count() > 1 and use_multi_gpu:
         print('Using ', torch.cuda.device_count(), 'GPUs...')
@@ -274,6 +275,6 @@ if __name__ == '__main__':
                 if int(index) % save_freq == 0:
                     weight_save_path = save_path + '_weight/'
                     torch.save(S.state_dict(), weight_save_path + index + 'S.pt')
-                    torch.save(G.state_dict(), weight_save_path + index +  'G.pt')
+                    torch.save(G_average.state_dict(), weight_save_path + index +  'G.pt')
                     torch.save(D.state_dict(), weight_save_path + index + 'D.pt')
             step_cnt += 1
