@@ -155,7 +155,7 @@ class ModulatedConvBlock(Module):
             if t is not None:
                 x += t
                 x /= ROOT_2
-            out = F.tanh(self.out_conv(x))
+            out = self.out_conv(x)
             return x, out
         else:
             return x

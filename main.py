@@ -121,6 +121,7 @@ if __name__ == '__main__':
     dataset = TANOCIv2_Dataset(img_size=img_size, dataset_path=dataset_path, transform=basic_transform)
     dataloader = DataLoader(dataset=dataset, batch_size=batch_size, shuffle=True, num_workers=8)
 
+    first = True
     S = Networkv1.StyleMapper(z_size, style_size, mapping_lr, device)
     if version == 1:
         G = Networkv1.Generator(gen_channel, texture_size, style_size, gen_nonlocal_loc, gen_lr, img_size, device)
@@ -266,7 +267,8 @@ if __name__ == '__main__':
                     print('step ', step_cnt, 'SG averaging param applied...')
                     G_current_params = [p for p in G.parameters()]
                     averaging_param(G_old_parmas, G_current_params)
-            if step_cnt == 1 or step_cnt % verbose_freq == 0:
+            if first or step_cnt == 1 or step_cnt % verbose_freq == 0:
+                first = False
                 img_save_path = save_path + '_img/'
                 index = str(step_cnt//verbose_freq)
                 vis_fake = G_average(S(visual_seed)).detach()
