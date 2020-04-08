@@ -43,4 +43,4 @@ class TANOCIv2_Dataset(Dataset):
             img = TF.to_tensor(img)
             img = TF.normalize(img, [0.5,0.5,0.5], [0.5,0.5,0.5])
             return img
-
+  
