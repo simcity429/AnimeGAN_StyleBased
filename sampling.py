@@ -12,7 +12,7 @@ from torch.distributions import MultivariateNormal
 from torch.nn import Module, DataParallel
 from CustomDataset import TANOCIv2_Dataset
 
-COMPUTE_MEAN_ITER = 1000
+COMPUTE_MEAN_ITER = 10000
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
