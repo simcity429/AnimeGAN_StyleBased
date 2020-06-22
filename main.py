@@ -31,7 +31,7 @@ def cp_module(src:Module, dst:Module):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    #general arguments
+    #general argument
     parser.add_argument('--load_index', default=0)
     parser.add_argument('--version', default=2)
     parser.add_argument('--device', default='cuda:0')
@@ -39,21 +39,20 @@ if __name__ == '__main__':
     parser.add_argument('--save_path', default='./result')
     parser.add_argument('--epoch', default=1000)
     parser.add_argument('--img_level', default=7)
-    parser.add_argument('--batch_size', default=32)
+    parser.add_argument('--batch_size', default=16)
     parser.add_argument('--verbose_freq', default=100)
     parser.add_argument('--save_freq', default=10)
     parser.add_argument('--z_cov', default=1)
-    parser.add_argument('--interpolate_num', default=8)
     parser.add_argument('--ema_decay', default=0.99)
-    parser.add_argument('--ema_start', default=10000)
+    parser.add_argument('--ema_start', default=100000)
 
     #generator arguments
     parser.add_argument('--style_size', default=128)
-    parser.add_argument('--z_size', default=8)
+    parser.add_argument('--z_size', default=128)
     parser.add_argument('--texture_size', default=4)
-    parser.add_argument('--gen_channel', default=256)
+    parser.add_argument('--gen_channel', default=400)
     parser.add_argument('--gen_nonlocal_loc', default=-1)
-    parser.add_argument('--gen_lr', default=0.002)
+    parser.add_argument('--gen_lr', default=0.001)
     parser.add_argument('--mapping_lr_ratio', default=0.01)
     parser.add_argument('--gen_lazy', default=8)
 
@@ -79,7 +78,6 @@ if __name__ == '__main__':
     verbose_freq = int(args.verbose_freq)
     save_freq = int(args.save_freq)
     z_cov = float(args.z_cov)
-    interpolate_num = int(args.interpolate_num)
     ema_decay = float(args.ema_decay)
     ema_start = int(args.ema_start)
 
@@ -110,7 +108,7 @@ if __name__ == '__main__':
         raise Exception('invalid argument in device (main)')
 
     #basic transformation for our dataset
-    basic_transform = T.Compose([T.RandomHorizontalFlip(), T.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1)])
+    basic_transform = T.Compose([T.RandomHorizontalFlip(), T.ColorJitter(brightness=0, contrast=0.1, saturation=0.1)])
     dataset = TANOCIv2_Dataset(img_size=img_size, dataset_path=dataset_path, transform=basic_transform)
     dataloader = DataLoader(dataset=dataset, batch_size=batch_size, shuffle=True, num_workers=8)
 
@@ -146,15 +144,9 @@ if __name__ == '__main__':
         D = DataParallel(D)
     print('Parameter numbers: S, G, D')
     print(count_parameters(S), count_parameters(G), count_parameters(D))
-    #visual seed(interpolation applied)
-    dist = MultivariateNormal(loc=torch.zeros(batch_size//interpolate_num,z_size), covariance_matrix=z_cov*torch.eye(z_size))
-    v = dist.sample().numpy()
-    v_len = np.sqrt(np.sum(v**2, axis=1, keepdims=True))
-    v /= v_len
-    v *= float(np.sqrt(z_size))
-    visual_seed = torch.FloatTensor(np.linspace(v, -v, interpolate_num).transpose(1,0,2).reshape((-1,z_size))).to(device)
-
+    #visual seed
     dist = MultivariateNormal(loc=torch.zeros(batch_size, z_size), covariance_matrix=z_cov*torch.eye(z_size))
+    visual_seed = torch.FloatTensor(dist.sample()).to(device)
 
     previous_grads_norm = 0
     step_cnt = 1 + verbose_freq*load_index

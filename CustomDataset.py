@@ -7,7 +7,7 @@ from PIL import Image
 from torch.utils.data import Dataset
 
 #basic transformation for our dataset
-BASIC_TRANSFORM = T.Compose([T.RandomHorizontalFlip(), T.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1)])
+BASIC_TRANSFORM = T.Compose([T.RandomHorizontalFlip(), T.ColorJitter(brightness=0, contrast=0.1, saturation=0.1)])
 
 class TANOCIv2_Dataset(Dataset):
     def __init__(self, img_size, dataset_path, transform):
