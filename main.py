@@ -34,27 +34,26 @@ if __name__ == '__main__':
     #general arguments
     parser.add_argument('--load_index', default=0)
     parser.add_argument('--version', default=2)
-    parser.add_argument('--lir', required=True)
     parser.add_argument('--device', default='cuda:0')
-    parser.add_argument('--dataset_path', required=True)
-    parser.add_argument('--save_path', required=True)
+    parser.add_argument('--dataset_path', default='./TANOCI-v2')
+    parser.add_argument('--save_path', default='./result')
     parser.add_argument('--epoch', default=1000)
-    parser.add_argument('--img_level', default=6)
-    parser.add_argument('--batch_size', default=24)
+    parser.add_argument('--img_level', default=7)
+    parser.add_argument('--batch_size', default=32)
     parser.add_argument('--verbose_freq', default=100)
     parser.add_argument('--save_freq', default=10)
     parser.add_argument('--z_cov', default=1)
     parser.add_argument('--interpolate_num', default=8)
     parser.add_argument('--ema_decay', default=0.99)
-    parser.add_argument('--ema_start', default=50000)
+    parser.add_argument('--ema_start', default=10000)
 
     #generator arguments
     parser.add_argument('--style_size', default=128)
     parser.add_argument('--z_size', default=8)
     parser.add_argument('--texture_size', default=4)
     parser.add_argument('--gen_channel', default=256)
-    parser.add_argument('--gen_nonlocal_loc', default=2)
-    parser.add_argument('--gen_lr', default=0.001)
+    parser.add_argument('--gen_nonlocal_loc', default=-1)
+    parser.add_argument('--gen_lr', default=0.002)
     parser.add_argument('--mapping_lr_ratio', default=0.01)
     parser.add_argument('--gen_lazy', default=8)
 
@@ -68,12 +67,6 @@ if __name__ == '__main__':
 
     load_index = int(args.load_index)
     version = int(args.version)
-    if args.lir == "True" or args.lir == "true":
-        lir = True
-    elif args.lir == "False" or args.lir == "false":
-        lir = False
-    else:
-        raise Exception('wrong value on lir')
     device = str(args.device)
     #device: 'multi', 'cpu', 'cuda:%d'
     #'multi' uses all the GPUs
@@ -160,32 +153,16 @@ if __name__ == '__main__':
     v /= v_len
     v *= float(np.sqrt(z_size))
     visual_seed = torch.FloatTensor(np.linspace(v, -v, interpolate_num).transpose(1,0,2).reshape((-1,z_size))).to(device)
-    #baseline
-    if not lir:
-        dist = MultivariateNormal(loc=torch.zeros(batch_size, z_size), covariance_matrix=z_cov*torch.eye(z_size))
-        #visual_seed = torch.FloatTensor(dist.sample()).to(device)
-    else:
-        epsilon_dist = MultivariateNormal(loc=torch.zeros(batch_size, z_size), covariance_matrix=torch.eye(z_size))
+
+    dist = MultivariateNormal(loc=torch.zeros(batch_size, z_size), covariance_matrix=z_cov*torch.eye(z_size))
+
     previous_grads_norm = 0
     step_cnt = 1 + verbose_freq*load_index
     for e in range(epoch):
         for real in dataloader:
             real = real.to(device)
             real_batch_size = real.size()[0]
-            #baseline
-            if not lir:
-                z = torch.FloatTensor(dist.sample()).to(device)[:real_batch_size]
-            else:
-                #Linear interpolation regulation
-                v = dist.sample().numpy()
-                v_len = np.sqrt(np.sum(v**2, axis=1, keepdims=True))
-                v /= v_len
-                v = v.reshape(batch_size//interpolate_num,z_size,1)
-                epsilon  = epsilon_dist.sample().numpy()
-                epsilon = np.sqrt(np.sum(epsilon**2, axis=1)).reshape((batch_size//interpolate_num, 1, interpolate_num))
-                v = v*epsilon
-                v = v.transpose((0,2,1)).reshape(batch_size, -1)
-                z = torch.FloatTensor(v).to(device)[:real_batch_size]
+            z = torch.FloatTensor(dist.sample()).to(device)[:real_batch_size]
             print('------------!--------------!------------')
             #d_update
             G_fake = G(S(z))
@@ -250,7 +227,7 @@ if __name__ == '__main__':
                 S.module.opt.zero_grad()
                 G.module.opt.zero_grad()
             else:
-                S.opt.zero_grad()
+                S.opt.zero_grad()                             
                 G.opt.zero_grad()
             g_loss.backward()
             if torch.cuda.device_count() > 1 and use_multi_gpu:
@@ -273,7 +250,7 @@ if __name__ == '__main__':
                 index = str(step_cnt//verbose_freq)
                 vis_fake = G_average(S(visual_seed)).detach()
                 save_image(make_grid(vis_fake), img_save_path + index + '.jpg', normalize=True)
-                save_image(make_grid(vis_fake), args.lir + '.jpg', normalize=True)
+                save_image(make_grid(vis_fake), 'tmp.jpg', normalize=True)
                 if int(index) % save_freq == 0:
                     weight_save_path = save_path + '_weight/'
                     torch.save(S.state_dict(), weight_save_path + index + 'S.pt')

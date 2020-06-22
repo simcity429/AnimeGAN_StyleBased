@@ -3,7 +3,7 @@ import torch
 import torch.nn.functional as F
 from torch.nn import Linear, Conv2d, UpsamplingBilinear2d, AvgPool2d, LeakyReLU, Flatten, LayerNorm
 from torch.nn import Module, ModuleList, Sequential
-from torch.optim import Adam
+from torch.optim import AdamW
 from Networkv1 import make_noise_img, Weight_Scaling, Disc_Conv, StyleMapper, Non_Local, Minibatch_Stddev
 
 BETAS = (0, 0.99)
@@ -67,7 +67,7 @@ class Discriminator(Module):
         self.module_list.append(Weight_Scaling(in_channels, 1))
         self.module_list.append(Linear(in_channels, 1))
         self.to(device)
-        self.opt = Adam(self.parameters(), lr=disc_lr, betas=BETAS)
+        self.opt = AdamW(self.parameters(), lr=disc_lr, betas=BETAS)
         self.apply(init_weights)
 
     def forward(self, x):
@@ -200,7 +200,7 @@ class Generator(Module):
             if in_size > img_size:
                 break
         self.to(device)
-        self.opt = Adam(self.parameters(), lr=gen_lr, betas=BETAS)
+        self.opt = AdamW(self.parameters(), lr=gen_lr, betas=BETAS)
         self.apply(init_weights)
 
     def forward(self, style_base):
