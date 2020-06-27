@@ -44,7 +44,7 @@ if __name__ == '__main__':
     parser.add_argument('--save_freq', default=10)
     parser.add_argument('--z_cov', default=1)
     parser.add_argument('--ema_decay', default=0.99)
-    parser.add_argument('--ema_start', default=100000)
+    parser.add_argument('--ema_start', default=1e12)
 
     #generator arguments
     parser.add_argument('--style_size', default=128)
@@ -132,12 +132,18 @@ if __name__ == '__main__':
         S_load_path = save_path + '_weight/' + str(load_index) + 'S.pt'
         G_load_path = save_path + '_weight/' + str(load_index) + 'G.pt'
         D_load_path = save_path + '_weight/' + str(load_index) + 'D.pt'
+        if torch.cuda.device_count() > 1 and use_multi_gpu:
+            print('Using ', torch.cuda.device_count(), 'GPUs...')
+            S = DataParallel(S)
+            D = DataParallel(D)
         S.load_state_dict(torch.load(S_load_path))
         G.load_state_dict(torch.load(G_load_path))
         D.load_state_dict(torch.load(D_load_path))
         cp_module(G, G_average)
+        if torch.cuda.device_count() > 1 and use_multi_gpu:
+            G = DataParallel(G)
         print('loading complete!')
-    if torch.cuda.device_count() > 1 and use_multi_gpu:
+    elif torch.cuda.device_count() > 1 and use_multi_gpu:
         print('Using ', torch.cuda.device_count(), 'GPUs...')
         S = DataParallel(S)
         G = DataParallel(G)
